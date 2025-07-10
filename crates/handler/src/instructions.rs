@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use interpreter::{
-    instructions::{instruction_table, InstructionTable},
+    instructions::{instruction_table, superinstruction_table, InstructionTable},
     Host, Instruction, InterpreterTypes,
 };
 use std::boxed::Box;
@@ -15,11 +15,18 @@ pub trait InstructionProvider {
 
     /// Returns the instruction table that is used by EvmTr to execute instructions.
     fn instruction_table(&self) -> &InstructionTable<Self::InterpreterTypes, Self::Context>;
+
+    /// Returns the instruction table that is used by EvmTr to execute instructions.
+    fn superinstruction_table(&self) -> &InstructionTable<Self::InterpreterTypes, Self::Context> {
+        return self.instruction_table()
+    }
 }
 
 /// Ethereum instruction contains list of mainnet instructions that is used for Interpreter execution.
 pub struct EthInstructions<WIRE: InterpreterTypes, HOST> {
     pub instruction_table: Box<InstructionTable<WIRE, HOST>>,
+    /// Table containing instruction and superinstruction implementations indexed by opcode.
+    pub superinstruction_table: Box<InstructionTable<WIRE, HOST>>,
 }
 
 impl<WIRE, HOST> Clone for EthInstructions<WIRE, HOST>
@@ -29,6 +36,7 @@ where
     fn clone(&self) -> Self {
         Self {
             instruction_table: self.instruction_table.clone(),
+            superinstruction_table: self.superinstruction_table.clone(),
         }
     }
 }
@@ -47,6 +55,7 @@ where
     pub fn new(base_table: InstructionTable<WIRE, HOST>) -> Self {
         Self {
             instruction_table: Box::new(base_table),
+            superinstruction_table: Box::new(superinstruction_table::<WIRE, HOST>()),
         }
     }
 
@@ -66,6 +75,10 @@ where
 
     fn instruction_table(&self) -> &InstructionTable<Self::InterpreterTypes, Self::Context> {
         &self.instruction_table
+    }
+
+    fn superinstruction_table(&self) -> &InstructionTable<Self::InterpreterTypes, Self::Context> {
+        &self.superinstruction_table
     }
 }
 

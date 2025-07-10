@@ -4,6 +4,7 @@ use crate::{
     FrameInitOrResult, FrameOrResult, ItemOrResult,
 };
 use bytecode::{Eof, EOF_MAGIC_BYTES};
+use crate::opcode_compiler::gen_or_rewrite_optimized_code;
 use context::result::FromStringError;
 use context::LocalContextTr;
 use context_interface::context::ContextError;
@@ -70,6 +71,9 @@ pub struct EthFrame<EVM, ERROR, IW: InterpreterTypes> {
     pub checkpoint: JournalCheckpoint,
     /// Interpreter.
     pub interpreter: Interpreter<IW>,
+
+    /// whether current frame is superinstruction
+    pub is_superinstruction: bool,
 }
 
 impl<EVM, ERROR> Frame for EthFrame<EVM, ERROR, EthInterpreter>
@@ -108,7 +112,7 @@ where
     }
 
     fn run(&mut self, context: &mut Self::Evm) -> Result<FrameInitOrResult<Self>, Self::Error> {
-        let next_action = context.run_interpreter(&mut self.interpreter);
+        let next_action = context.run_interpreter(&mut self.interpreter, self.is_superinstruction);
         self.process_next_action(context, next_action)
     }
 
@@ -133,6 +137,7 @@ where
         depth: usize,
         interpreter: Interpreter<IW>,
         checkpoint: JournalCheckpoint,
+        is_superinstruction: bool,
     ) -> Self {
         Self {
             phantom: Default::default(),
@@ -141,6 +146,7 @@ where
             depth,
             interpreter,
             checkpoint,
+            is_superinstruction,
         }
     }
 }
@@ -266,6 +272,7 @@ where
             context.journal().checkpoint_commit();
             return return_result(InstructionResult::Stop);
         }
+        let (bytecode, cache_hit) = gen_or_rewrite_optimized_code(&code_hash, bytecode);
 
         // Create interpreter and executes call and push new CallStackFrame.
         Ok(ItemOrResult::Item(Self::new(
@@ -284,6 +291,7 @@ where
                 gas_limit,
             ),
             checkpoint,
+            cache_hit,
         )))
     }
 
@@ -393,6 +401,7 @@ where
                 gas_limit,
             ),
             checkpoint,
+            false,
         )))
     }
 
@@ -509,6 +518,7 @@ where
                 gas_limit,
             ),
             checkpoint,
+            false,
         )))
     }
 

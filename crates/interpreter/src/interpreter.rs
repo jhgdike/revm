@@ -180,6 +180,15 @@ impl<IW: InterpreterTypes> Interpreter<IW> {
 
         self.take_next_action()
     }
+
+    /// Convenience method to halt execution with the given `InstructionResult`.
+    /// This is a thin wrapper around `self.control.set_instruction_result` and
+    /// exists mostly to maintain backward-compatibility with legacy code that
+    /// called `interpreter.halt(...)` directly.
+    #[inline]
+    pub fn halt(&mut self, reason: InstructionResult) {
+        self.control.set_instruction_result(reason);
+    }
 }
 
 /// The result of an interpreter operation.

@@ -22,6 +22,7 @@ pub trait EvmTr {
         interpreter: &mut Interpreter<
             <Self::Instructions as InstructionProvider>::InterpreterTypes,
         >,
+        is_superinstruction: bool,
     ) -> <<Self::Instructions as InstructionProvider>::InterpreterTypes as InterpreterTypes>::Output;
 
     /// Returns a mutable reference to the execution context
@@ -58,11 +59,16 @@ where
         interpreter: &mut Interpreter<
             <Self::Instructions as InstructionProvider>::InterpreterTypes,
         >,
+        is_superinstruction: bool,
     ) -> <<Self::Instructions as InstructionProvider>::InterpreterTypes as InterpreterTypes>::Output
     {
         let context = &mut self.ctx;
         let instructions = &mut self.instruction;
-        interpreter.run_plain(instructions.instruction_table(), context)
+        let ins_table = match is_superinstruction {
+            true => instructions.superinstruction_table(),
+            false => instructions.instruction_table(),
+        };
+        interpreter.run_plain(ins_table, context)
     }
     #[inline]
     fn ctx(&mut self) -> &mut Self::Context {

@@ -1,0 +1,45 @@
+use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+use lru::LruCache;
+use primitives::B256;
+use bytecode::Bytecode;
+use std::num::NonZeroUsize;
+use thiserror::Error;
+
+/// global opcode cache (LRU, cap 1024)
+static OPCODE_CACHE: Lazy<RwLock<LruCache<B256, Bytecode>>> = Lazy::new(|| {
+    const CAP: usize = 1024;
+    RwLock::new(LruCache::new(NonZeroUsize::new(CAP).expect("non-zero")))
+});
+
+#[derive(Debug, Error)]
+pub(crate) enum OpCodeCacheError {
+    #[error("opcode cache miss" )]
+    NotFound,
+}
+
+/// simple interface for outer use
+pub(crate) struct OpCodeCache;
+
+impl OpCodeCache {
+    /// fetch bytecode by code_hash, return `OpCodeCacheError::NotFound` if not exist
+    pub(crate) fn get(key: &B256) -> Result<Bytecode, OpCodeCacheError> {
+        let mut guard = OPCODE_CACHE.write();
+        guard
+            .get(key)
+            .cloned()
+            .ok_or(OpCodeCacheError::NotFound)
+    }
+
+    /// insert to update
+    pub(crate) fn insert(key: B256, value: Bytecode) {
+        let mut guard = OPCODE_CACHE.write();
+        guard.put(key, value);
+    }
+
+    /// delete
+    pub(crate) fn remove(key: B256) {
+        let mut guard = OPCODE_CACHE.write();
+        guard.pop(&key);
+    }
+}

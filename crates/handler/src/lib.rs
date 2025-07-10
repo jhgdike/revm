@@ -22,6 +22,8 @@ pub mod pre_execution;
 mod precompile_provider;
 pub mod system_call;
 pub mod validation;
+mod opcode_compiler;
+mod opcode_cache;
 
 // Public exports
 pub use api::{ExecuteCommitEvm, ExecuteEvm};
