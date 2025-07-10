@@ -30,6 +30,7 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 # parse opcode feature
 paste = { workspace = true, optional = true }
 phf = { workspace = true, features = ["macros"], optional = true }
+thiserror = "1"
 
 [features]
 default = ["std", "parse"]
