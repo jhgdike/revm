@@ -370,3 +370,261 @@ fn calculate_skip_steps(code: &[u8], cur: usize) -> Option<usize> {
         _ => None,
     }
 }
+
+/// BasicBlock represents a sequence of opcodes that can be executed linearly
+/// without any jumps in or out except at the beginning and end.
+#[derive(Debug)]
+pub struct BasicBlock {
+    /// inclusive start PC
+    pub start_pc: usize,
+    /// exclusive end PC
+    pub end_pc: usize,
+    /// raw bytes of opcodes in this block
+    pub opcodes: Vec<u8>,
+    /// If this block ends with a jump, the target PC else None
+    pub jump_target: Option<usize>,
+    /// Whether this block starts with a JUMPDEST
+    pub is_jump_dest: bool,
+}
+
+impl BasicBlock {
+    /// 将整段字节码切分为若干 BasicBlock
+    pub fn generate(code: &[u8]) -> Box<[Self]> {
+        if code.is_empty() {
+            return Vec::new().into_boxed_slice();
+        }
+
+        use std::collections::HashSet;
+
+        // -------------- First pass: identify all JUMPDEST locations --------------
+        let mut jump_dests: HashSet<usize> = HashSet::new();
+        let mut pc = 0usize;
+        while pc < code.len() {
+            let op = code[pc];
+            if op == op::JUMPDEST {
+                jump_dests.insert(pc);
+                pc += 1;
+                continue
+            }
+            // Add 1 for the opcode byte
+            if let Some(skip) = calculate_skip_steps(code, pc) {
+                pc += 1 + skip;
+            } else {
+                pc += 1;
+            }
+        }
+
+        // -------------- Second pass: build basic blocks --------------
+        let mut blocks: Vec<BasicBlock> = Vec::new();
+        pc = 0;
+        let mut current: Option<BasicBlock> = None;
+        while pc < code.len() {
+            let op = code[pc];
+
+            // 需要开始新块的条件：
+            if op == op::INVALID || jump_dests.contains(&pc) {
+                if let Some(mut blk) = current.take() {
+                    blk.end_pc = pc;
+                    blocks.push(blk);
+                }
+                current = Some(BasicBlock {
+                    start_pc: pc,
+                    end_pc: 0,
+                    opcodes: Vec::new(),
+                    jump_target: None,
+                    is_jump_dest: op == op::JUMPDEST,
+                });
+            } else if current.is_none() {
+                current = Some(BasicBlock {
+                    start_pc: pc,
+                    end_pc: 0,
+                    opcodes: Vec::new(),
+                    jump_target: None,
+                    is_jump_dest: op == op::JUMPDEST,
+                });
+            }
+
+            // Determine instruction length
+            let (inst_len, has_immediate) = if let Some(skip) = calculate_skip_steps(code, pc) {
+                (1 + skip, true)
+            } else {
+                (1, false)
+            };
+
+            // Check bounds before accessing
+            let bounded_len = if pc + inst_len > code.len() {
+                code.len() - pc
+            } else {
+                inst_len
+            };
+
+            // Add instruction bytes to block
+            if let Some(ref mut blk) = current {
+                blk.opcodes.extend_from_slice(&code[pc..pc + bounded_len]);
+            }
+
+            pc += bounded_len;
+
+            // If this is a block terminator (other than INVALID since we already handled it), end the block
+            if is_block_terminator(op) {
+                if let Some(mut blk) = current.take() {
+                    blk.end_pc = pc;
+                    // 处理无条件跳转目标（JUMP / RJUMP / JUMPF）
+                    if (op == op::JUMP) && has_immediate {
+                        let imm_start = blk.opcodes.len() - (inst_len - 1); // 跳过 opcode 本身
+                        let imm_bytes = &blk.opcodes[imm_start..];
+                        // 截取低 8 字节转 usize
+                        let mut tgt: usize = 0;
+                        for &b in imm_bytes.iter().rev().take(8) {
+                            tgt = (tgt << 8) | b as usize;
+                        }
+                        blk.jump_target = Some(tgt);
+                    }
+                    blocks.push(blk);
+                    current = None;
+                }
+            }
+        }
+
+        if let Some(mut blk) = current {
+            blk.end_pc = pc;
+            blocks.push(blk);
+        }
+
+        blocks.into_boxed_slice()
+    }
+}
+
+/// 判断给定 opcode 是否终结 BasicBlock
+fn is_block_terminator(op: u8) -> bool {
+    matches!(
+        op,
+        op::STOP
+            | op::RETURN
+            | op::REVERT
+            | op::SELFDESTRUCT
+            | op::JUMP
+            | op::JUMPI
+    )
+}
+
+// =============================================================================
+//  CFG-based opcode fusion – translated from provided Go implementation
+// =============================================================================
+
+/// 基于基本块（CFG）分析的 opcode 融合入口。
+///
+/// * 若字节码为空或基本块产生失败，则返回 `FusionError::FailPreprocessing`；
+/// * 如发现任何块中已出现优化 opcode（0xB0–0xC8），立即返回同样错误；
+/// * 否则仅对选定类型的基本块执行融合，其余保持原状。
+pub fn do_cfg_based_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
+    // 生成基本块
+    let blocks = BasicBlock::generate(code);
+    if blocks.is_empty() {
+        return Err(FusionError::FailPreprocessing);
+    }
+
+    // 拷贝原始字节码，后续修改写回此副本
+    let mut fused_code = code.to_vec();
+
+    // 遍历每个基本块
+    for (idx, block) in blocks.iter().enumerate() {
+        // 跳过类型为 Others 的块
+        let blk_ty = get_block_type(block, &blocks, idx);
+        if matches!(blk_ty, BlockType::Others) {
+            continue;
+        }
+
+        // ---------- 预扫描：检测优化 opcode ----------
+        let mut pc = block.start_pc;
+        while pc < block.end_pc && pc < code.len() {
+            let byte = code[pc];
+            if (MIN_OPTIMIZED_OPCODE..=MAX_OPTIMIZED_OPCODE).contains(&byte) {
+                return Err(FusionError::FailPreprocessing);
+            }
+            if let Some(skip) = calculate_skip_steps(code, pc) {
+                pc += 1 + skip;
+            } else {
+                pc += 1;
+            }
+        }
+
+        // ---------- 检测 INVALID ----------
+        let mut pc = block.start_pc;
+        let mut has_invalid = false;
+        while pc < block.end_pc && pc < code.len() {
+            if code[pc] == op::INVALID {
+                has_invalid = true;
+                break;
+            }
+            if let Some(skip) = calculate_skip_steps(code, pc) {
+                pc += 1 + skip;
+            } else {
+                pc += 1;
+            }
+        }
+        if has_invalid {
+            continue; // 跳过含 INVALID 的块
+        }
+
+        // ---------- 应用融合 ----------
+        fuse_block(&mut fused_code, block)?;
+    }
+
+    Ok(fused_code)
+}
+
+// -----------------------------------------------------------------------------
+//  Block-level helpers
+// -----------------------------------------------------------------------------
+
+/// 区分基本块类型（与 Go 版本保持一致）
+#[derive(PartialEq, Eq)]
+enum BlockType {
+    Empty,
+    EntryBB,
+    JumpDest,
+    ConditionalFallthrough,
+    Others,
+}
+
+fn get_block_type(block: &BasicBlock, blocks: &[BasicBlock], index: usize) -> BlockType {
+    if block.opcodes.is_empty() {
+        return BlockType::Empty;
+    }
+    if block.start_pc == 0 {
+        return BlockType::EntryBB;
+    }
+    if block.is_jump_dest {
+        return BlockType::JumpDest;
+    }
+    if index > 0 {
+        let prev = &blocks[index - 1];
+        if let Some(&last) = prev.opcodes.last() {
+            if last == op::JUMPI {
+                return BlockType::ConditionalFallthrough;
+            }
+        }
+    }
+    BlockType::Others
+}
+
+/// 对单个基本块执行 opcode 融合。直接在 `code` 切片上原地修改。
+fn fuse_block(code: &mut [u8], block: &BasicBlock) -> Result<(), FusionError> {
+    let start = block.start_pc;
+    let end = block.end_pc.min(code.len());
+    if start >= end {
+        return Ok(());
+    }
+
+    // 为了复用已有的 `do_code_fusion` 逻辑，我们对块切片执行一次整体融合，
+    // 之后把结果写回原字节码。
+    {
+        let slice = &code[start..end];
+        let fused_slice = do_code_fusion(slice)?; // 可能返回 FailPreprocessing，但前面已排除。
+        debug_assert_eq!(fused_slice.len(), slice.len());
+        // SAFETY: start..end 与 fused_slice 长度一致
+        code[start..end].copy_from_slice(&fused_slice);
+    }
+    Ok(())
+}

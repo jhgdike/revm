@@ -6,9 +6,11 @@ use bytecode::Bytecode;
 use std::num::NonZeroUsize;
 use thiserror::Error;
 
+const MAX_CACHE_SIZE: usize = 1024 * 128;
+
 /// global opcode cache (LRU, cap 1024)
 static OPCODE_CACHE: Lazy<RwLock<LruCache<B256, Bytecode>>> = Lazy::new(|| {
-    const CAP: usize = 1024;
+    const CAP: usize = MAX_CACHE_SIZE;
     RwLock::new(LruCache::new(NonZeroUsize::new(CAP).expect("non-zero")))
 });
 

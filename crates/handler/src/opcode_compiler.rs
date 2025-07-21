@@ -23,7 +23,7 @@ static CODE_FUSION_TX: Lazy<Sender<(OptimizeTaskType, B256, Bytecode)>> = Lazy::
             while let Ok((typ, hash, code)) = rx.recv() {
                 match typ {
                     OptimizeTaskType::Generate => {
-                        if let Ok(fused_vec) = opcode_optimizer::do_code_fusion(code.bytes_slice()) {
+                        if let Ok(fused_vec) = opcode_optimizer::do_cfg_based_opcode_fusion(code.bytes_slice()) {
                             let fused = Bytecode::new_raw(Bytes::from(fused_vec));
                             OpCodeCache::insert(hash, fused);
                         }
