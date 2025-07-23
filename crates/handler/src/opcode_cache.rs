@@ -25,23 +25,22 @@ pub(crate) struct OpCodeCache;
 
 impl OpCodeCache {
     /// fetch bytecode by code_hash, return `OpCodeCacheError::NotFound` if not exist
-    pub(crate) fn get(key: &B256) -> Result<Bytecode, OpCodeCacheError> {
+    pub(crate) fn get(key: &B256) -> Option<Bytecode> {
         let mut guard = OPCODE_CACHE.write();
         guard
             .get(key)
             .cloned()
-            .ok_or(OpCodeCacheError::NotFound)
     }
 
     /// insert to update
-    pub(crate) fn insert(key: B256, value: Bytecode) {
+    pub(crate) fn insert(key: &B256, value: Bytecode) {
         let mut guard = OPCODE_CACHE.write();
-        guard.put(key, value);
+        guard.put(*key, value);
     }
 
     /// delete
-    pub(crate) fn remove(key: B256) {
+    pub(crate) fn remove(key: &B256) {
         let mut guard = OPCODE_CACHE.write();
-        guard.pop(&key);
+        guard.pop(key);
     }
 }

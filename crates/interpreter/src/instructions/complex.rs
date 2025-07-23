@@ -27,13 +27,13 @@ pub(super)fn and_swap1_pop_swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(
     gas!(context.interpreter, 4*gas::VERYLOW+gas::BASE);
 
     // 1. pop 两个操作数
-    popn!([a, b, _c, d, e], context.interpreter);
+    popn!([a, b], context.interpreter);
     let r = a & b;
+    backn!([c, d, e], context.interpreter);
+    *c = *d;
+    *d = *e;
+    *e = r;
 
-    // 3. 以 [r, e, d] 顺序压栈，压栈后栈顶依次是 d, e, r
-    push!(context.interpreter, r);
-    push!(context.interpreter, e);
-    push!(context.interpreter, d);
     context.interpreter.bytecode.relative_jump(4);
 }
 
@@ -49,10 +49,7 @@ pub(super) fn swap2_swap1_pop_jump<WIRE: InterpreterTypes, H: ?Sized>(
     popn!([a, _tmp], context.interpreter);
 
     // Read current top (will be the jump destination)
-    let Some(top) = context.interpreter.stack.top() else {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    };
+    backn!([top], context.interpreter);
     let dest_u256 = *top;
     // Replace top with `a`
     *top = a;
@@ -75,20 +72,25 @@ pub(super) fn swap1_pop_swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(
     // Gas: SWAP1 + POP + SWAP2 + SWAP1
     gas!(context.interpreter, 3*gas::VERYLOW + gas::BASE);
 
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-    }
+    // if !context.interpreter.stack.exchange(0, 1) {
+    //     context.interpreter.halt(InstructionResult::StackOverflow);
+    // }
 
-    // Pop two (top is `a` to be re-inserted)
-    popn!([_tmp], context.interpreter);
+    // // Pop two (top is `a` to be re-inserted)
+    // popn!([_tmp], context.interpreter);
 
-    if !context.interpreter.stack.exchange(0, 2) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-    }
+    // if !context.interpreter.stack.exchange(0, 2) {
+    //     context.interpreter.halt(InstructionResult::StackOverflow);
+    // }
 
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-    }
+    // if !context.interpreter.stack.exchange(0, 1) {
+    //     context.interpreter.halt(InstructionResult::StackOverflow);
+    // }
+    popn!([a], context.interpreter);
+    backn!([b, c, d], context.interpreter);
+    *b = *c;
+    *c = *d;
+    *d = a;
 
     // Skip over the remaining 3 bytes of the original sequence
     context.interpreter.bytecode.relative_jump(3);
@@ -102,20 +104,10 @@ pub(super)fn pop_swap2_swap1_pop<WIRE: InterpreterTypes, H: ?Sized>(
     gas!(context.interpreter, 2*gas::BASE + 2*gas::VERYLOW);
 
     // Discard first value, keep `b`
-    popn!([ _discard, b, _c ], context.interpreter);
-
-    let Some(top) = context.interpreter.stack.top() else {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    };
-    let d_val = *top;
-    // Replace old `d` with `b`
-    *top = b;
-    let _ = top;
-
-    // Duplicate `d` value
-    push!(context.interpreter, d_val);
-    
+    popn!([ _discard, b ], context.interpreter);
+    backn!([c, d], context.interpreter);
+    *c = *d;
+    *d = b;
 
     // Skip remaining 3 bytes
     context.interpreter.bytecode.relative_jump(3);
@@ -128,8 +120,7 @@ pub(super)fn push2_jump<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionC
 
     // Read immediate 2-byte destination (big-endian)
     let imm = context.interpreter.bytecode.read_slice(2);
-    let dest_u256 = U256::from_be_slice(imm);
-    let dest = as_usize_or_fail!(context.interpreter, dest_u256, InstructionResult::InvalidJump);
+    let dest = as_usize_or_fail!(context.interpreter, U256::from_be_slice(imm), InstructionResult::InvalidJump);
 
     if !context.interpreter.bytecode.is_valid_legacy_jump(dest) {
         context.interpreter.halt(InstructionResult::InvalidJump);
@@ -145,14 +136,13 @@ pub(super)fn push2_jumpi<WIRE: InterpreterTypes, H: ?Sized>(context: Instruction
 
     // Read immediate destination
     let imm = context.interpreter.bytecode.read_slice(2);
-    let dest_u256 = U256::from_be_slice(imm);
     // Pop condition
     popn!([cond], context.interpreter);
 
     if !cond.is_zero() {
         let dest = as_usize_or_fail!(
             context.interpreter,
-            dest_u256,
+            U256::from_be_slice(imm),
             InstructionResult::InvalidJump
         );
         if !context.interpreter.bytecode.is_valid_legacy_jump(dest) {
@@ -187,9 +177,9 @@ pub(super)fn push1_add<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCo
     gas!(context.interpreter, 2*gas::VERYLOW);
 
     let imm = context.interpreter.bytecode.read_u8() as u64;
-    popn!([b], context.interpreter);
-    let res = b + U256::from(imm);
-    push!(context.interpreter, res);
+    backn!([b], context.interpreter);
+    *b = *b + U256::from(imm);
+    // push!(context.interpreter, res);
 
     // Skip imm + NOP (2 bytes)
     context.interpreter.bytecode.relative_jump(2);
@@ -200,10 +190,7 @@ pub(super)fn push1_shl<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCo
     gas!(context.interpreter, 2*gas::VERYLOW);
 
     let shift = context.interpreter.bytecode.read_u8();
-    let Some(val) = context.interpreter.stack.top() else {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    };
+    backn!([val], context.interpreter);
 
     // `shift` 为 u8，范围已限定在 0..=255，无需再比较。
     *val = *val << (shift as usize);
@@ -259,15 +246,20 @@ pub(super)fn pop2<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext
 /// Fused instruction: SWAP2 SWAP1
 pub(super)fn swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext<'_, H, WIRE>) {
     gas!(context.interpreter, 2*gas::VERYLOW);
+    backn!([a, b, c], context.interpreter);
+    let tmp = *a;
+    *a = *b;
+    *b = *c;
+    *c = tmp;
 
-    if !context.interpreter.stack.exchange(0, 2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
+    // if !context.interpreter.stack.exchange(0, 2) {
+    //     context.interpreter.halt(InstructionResult::StackUnderflow);
+    //     return;
+    // }
+    // if !context.interpreter.stack.exchange(0, 1) {
+    //     context.interpreter.halt(InstructionResult::StackUnderflow);
+    //     return;
+    // }
     context.interpreter.bytecode.relative_jump(1);
 }
 
@@ -275,10 +267,12 @@ pub(super)fn swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(context: Instruction
 pub(super)fn swap2_pop<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext<'_, H, WIRE>) {
     gas!(context.interpreter, gas::VERYLOW + gas::BASE);
 
-    if !context.interpreter.stack.exchange(0, 2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
+    // if !context.interpreter.stack.exchange(0, 2) {
+    //     context.interpreter.halt(InstructionResult::StackUnderflow);
+    //     return;
+    // }
+    backn!([a, _b, c], context.interpreter);
+    *c = *a;
     // Pop the (now) top value
     popn!([ _x ], context.interpreter);
     context.interpreter.bytecode.relative_jump(1);
@@ -289,15 +283,16 @@ pub(super)fn dup2_lt<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCont
     gas!(context.interpreter, 2*gas::VERYLOW);
 
     // Duplicate 2nd item to top then perform LT
-    if !context.interpreter.stack.dup(2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
+    // if !context.interpreter.stack.dup(2) {
+    //     context.interpreter.halt(InstructionResult::StackUnderflow);
+    //     return;
+    // }
 
     // Pop the two operands
-    popn!([a, b], context.interpreter);
-    let result = if b < a { U256::ONE } else { U256::ZERO };
-    push!(context.interpreter, result);
+    // popn!([a, b], context.interpreter);
+    backn!([a, b], context.interpreter);
+    *a = if *b < *a { U256::ONE } else { U256::ZERO };
+    // push!(context.interpreter, result);
 
     context.interpreter.bytecode.relative_jump(1);
 }
@@ -307,15 +302,15 @@ pub(super)fn jump_if_zero<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
     // Approximated gas: ISZERO (VERYLOW) + JUMPI (HIGH)
-    gas!(context.interpreter, gas::VERYLOW + gas::HIGH);
+    gas!(context.interpreter, 2*gas::VERYLOW + gas::HIGH);
 
     // Pop condition value
     popn!([value], context.interpreter);
 
     if value.is_zero() {
         // Immediate destination is 2 bytes located 2 bytes ahead (skip NOP + imm16)
-        let dest_u16 = context.interpreter.bytecode.read_offset_u16(2);
-        let dest = dest_u16 as usize;
+        let dest = context.interpreter.bytecode.read_offset_u16(2) as usize;
+        // let dest = dest_u16 as usize;
         if !context.interpreter.bytecode.is_valid_legacy_jump(dest) {
             context.interpreter.halt(InstructionResult::InvalidJump);
             return;
@@ -330,7 +325,7 @@ pub(super)fn jump_if_zero<WIRE: InterpreterTypes, H: ?Sized>(
 /// Super NOP instruction (SNOP)
 pub(super)fn snop<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext<'_, H, WIRE>) {
     // Zero-cost, zero-effect.
-    gas!(context.interpreter, gas::ZERO);
+    // gas!(context.interpreter, gas::ZERO);
     // Nothing else to do.
 }
 
@@ -366,7 +361,7 @@ pub(super)fn dup2_mstore_push1_add<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
     // Gas: MSTORE (VERYLOW) + PUSH1 + ADD + small overhead
-    gas!(context.interpreter, 3*gas::VERYLOW + gas::BASE);
+    gas!(context.interpreter, 4*gas::VERYLOW);
 
     // Pop value to store
     popn!([val], context.interpreter);
@@ -386,8 +381,8 @@ pub(super)fn dup2_mstore_push1_add<WIRE: InterpreterTypes, H: ?Sized>(
 
     // Read immediate byte (located +2 from current ptr: NOP + imm)
     let imm = context.interpreter.bytecode.read_slice(3)[2];
-    let res = *offset_ref + U256::from(imm);
-    *offset_ref = res;
+    *offset_ref = *offset_ref + U256::from(imm);
+    // *offset_ref = res;
 
     // Skip remaining bytes (NOP, imm, NOP) => 4 bytes
     context.interpreter.bytecode.relative_jump(4);
@@ -397,7 +392,8 @@ pub(super)fn dup2_mstore_push1_add<WIRE: InterpreterTypes, H: ?Sized>(
 pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    gas!(context.interpreter, 4*gas::VERYLOW + gas::BASE);
+    // gas!(context.interpreter, 4*gas::VERYLOW + gas::BASE);
+    gas!(context.interpreter, 4*gas::VERYLOW);
 
     // Duplicate top
     if !context.interpreter.stack.dup(1) {
@@ -411,12 +407,14 @@ pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
         [slice[2], slice[3], slice[4], slice[5]]
     };
     let const_val = U256::from_be_slice(&bytes4);
-    push!(context.interpreter, const_val);
+    backn!([x], context.interpreter);
+    *x = if const_val == *x {U256::ONE} else { U256::ZERO }; 
+    // push!(context.interpreter, const_val);
 
-    // Equality check
-    popn!([a, x], context.interpreter); // a = const_val, x = duplicated original
-    let eq = if a == x { U256::ONE } else { U256::ZERO };
-    push!(context.interpreter, eq);
+    // // Equality check
+    // popn!([a, x], context.interpreter); // a = const_val, x = duplicated original
+    // let eq = if a == x { U256::ONE } else { U256::ZERO };
+    // push!(context.interpreter, eq);
 
     // Read 2-byte immediate for PUSH2 (offset 8-9 from current ptr)
     let dest_u16 = context.interpreter.bytecode.read_offset_u16(7);
@@ -426,20 +424,36 @@ pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
     context.interpreter.bytecode.relative_jump(9);
 }
 
+#[inline]
+fn hi31_is_zero(word: &B256) -> bool {
+    // 把前 24 字节当成 3 × u64 读取，再取第 25~31 字节组成的 u64
+    // => 只要 OR 后结果为 0，即全部为 0
+    let p = word.as_ptr() as *const u64;
+    // SAFETY: B256 恰好 32 字节，对齐到 u8；逐 8 字节读取合法
+    unsafe {
+        let v0 = *p;               // byte  0‥7
+        let v1 = *p.add(1);        // byte  8‥15
+        let v2 = *p.add(2);        // byte 16‥23
+        let last = *p.add(3) & 0xffff_ffff_ffff_ff00u64; // 去掉最低 1 byte
+        (v0 | v1 | v2 | last) == 0
+    }
+}
+
 /// Fused instruction: PUSH1 CALLDATALOAD PUSH1 SHR DUP1 PUSH4 GT PUSH2
 pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
     WIRE: InterpreterTypes,
     H: ?Sized,
 >(context: InstructionContext<'_, H, WIRE>) {
     // Rough gas: PUSH1+CALLDATALOAD+PUSH1+SHR+DUP1+PUSH4+GT+PUSH2
-    gas!(
-        context.interpreter,
-        4 * gas::VERYLOW + gas::MID + gas::HIGH + gas::BASE
-    );
+    // gas!(
+    //     context.interpreter,
+    //     4 * gas::VERYLOW + gas::MID + gas::HIGH + gas::BASE
+    // );
+    gas!(context.interpreter, 8*gas::VERYLOW);
 
     // Read immediate offset (1 byte right after opcode)
-    let bytes = context.interpreter.bytecode.read_slice(16);
-    if bytes.len() < 16 {
+    let bytes = context.interpreter.bytecode.read_slice(15);
+    if bytes.len() < 15 {
         context.interpreter.halt(InstructionResult::InvalidOperandOOG);
         return;
     }
@@ -463,28 +477,33 @@ pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
             }
         }
     }
-    let mut x = U256::from_be_bytes(word.0);
+    // let mut x = U256::from_be_bytes();
 
     // Read shift immediate (byte 4 in slice: index 3 is PUSH1 opcode (NOP), index 4 is imm)
-    let shift_byte = bytes[4] as usize;
+    let shift_byte = bytes[3] as usize;
+    let mut x = U256::ZERO;
     // 立即数来自字节，天然 <256，可直接右移
-    x >>= shift_byte;
+    if hi31_is_zero(&word) {
+        x = U256::from(word.0[31]) >> shift_byte;
+    }
 
     // Push x
     push!(context.interpreter, x);
+    push!(context.interpreter, x);
     // DUP1
-    if !context.interpreter.stack.dup(1) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-        return;
-    }
+    // if !context.interpreter.stack.dup(1) {
+    //     context.interpreter.halt(InstructionResult::StackOverflow);
+    //     return;
+    // }
 
     // Constant 4-byte big-endian located starting at index 8..12
-    let const_val = U256::from_be_slice(&bytes[8..12]);
+    let const_val = U256::from_be_slice(&bytes[7..11]);
 
-    push!(context.interpreter, const_val);
+    // push!(context.interpreter, const_val);
+    backn!([p_ref], context.interpreter);
 
     // GT: compare const_val (a) and copy of x (p)
-    popn_top!([_a], p_ref, context.interpreter);
+    // popn_top!([_a], p_ref, context.interpreter);
     if const_val > *p_ref {
         *p_ref = U256::ONE;
     } else {
@@ -492,7 +511,7 @@ pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
     }
 
     // PUSH2 dest (index 14,15)
-    let dest_u16 = ((bytes[14] as u16) << 8) | bytes[15] as u16;
+    let dest_u16 = ((bytes[13] as u16) << 8) | bytes[14] as u16;
     push!(context.interpreter, U256::from(dest_u16));
 
     // Skip remaining 15 bytes (pattern length 16)
@@ -503,11 +522,12 @@ pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
 pub(super)fn push1_push1_push1_shl_sub<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    gas!(context.interpreter, 2 * gas::VERYLOW + gas::BASE);
+    // gas!(context.interpreter, 2 * gas::VERYLOW + gas::BASE);
+    gas!(context.interpreter, 5*gas::VERYLOW);
 
     // Read the three immediates
-    let bytes = context.interpreter.bytecode.read_slice(8);
-    if bytes.len() < 8 {
+    let bytes = context.interpreter.bytecode.read_slice(7);
+    if bytes.len() < 7 {
         context.interpreter.halt(InstructionResult::InvalidOperandOOG);
         return;
     }
@@ -530,77 +550,26 @@ pub(super)fn swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt<
     WIRE: InterpreterTypes,
     H: ?Sized,
 >(context: InstructionContext<'_, H, WIRE>) {
-    gas!(context.interpreter, 10 * gas::VERYLOW);
+    // gas!(context.interpreter, 10 * gas::VERYLOW);
+    gas!(context.interpreter, 12*gas::VERYLOW);
 
     // 1. SWAP1
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
+    // if !context.interpreter.stack.exchange(0, 1) {
+    //     context.interpreter.halt(InstructionResult::StackUnderflow);
+    //     return;
+    // }
+
+    backn!([a,b], context.interpreter);
 
     // 2. PUSH1 immediate (byte index 2)
-    let imm = context.interpreter.bytecode.read_slice(3)[2];
-    push!(context.interpreter, U256::from(imm));
+    let imm = context.interpreter.bytecode.read_slice(2)[1];
+    // push!(context.interpreter, U256::from(imm));
+    *b = *a+*b+U256::from(imm)+U256::from(!imm);
 
-    // 3. DUP1
-    if !context.interpreter.stack.dup(1) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-        return;
-    }
-
-    // 4. NOT on top
-    let Some(top) = context.interpreter.stack.top() else {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    };
-    *top = !*top;
-    let _ = top;
-
-    // 5. SWAP2
-    if !context.interpreter.stack.exchange(0, 2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
-    // 6. ADD
-    popn!([a_val, b_val], context.interpreter);
-    let sum = a_val + b_val;
-    push!(context.interpreter, sum);
-
-    // 7. AND
-    popn!([c_val, d_val], context.interpreter);
-    let anded = c_val & d_val;
-    push!(context.interpreter, anded);
-
-    // 8. DUP2
-    if !context.interpreter.stack.dup(2) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-        return;
-    }
-
-    // 9. ADD
-    popn!([e_val, f_val], context.interpreter);
-    let add2 = e_val + f_val;
-    push!(context.interpreter, add2);
-
-    // 10. SWAP1
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
-    // 11. DUP2
-    if !context.interpreter.stack.dup(2) {
-        context.interpreter.halt(InstructionResult::StackOverflow);
-        return;
-    }
-
-    // 12. LT
-    popn_top!([g_val], h_ref, context.interpreter);
-    if g_val < *h_ref {
-        *h_ref = U256::ONE;
+    if *b < *a {
+        *a = U256::ONE;
     } else {
-        *h_ref = U256::ZERO;
+        *a = U256::ZERO;
     }
 
     // Skip remaining 12 bytes (pattern length 13)
@@ -611,46 +580,18 @@ pub(super)fn swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt<
 pub(super)fn and_dup2_add_swap1_dup2_lt<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    gas!(context.interpreter, 5 * gas::VERYLOW);
+    // gas!(context.interpreter, 5 * gas::VERYLOW);
+    gas!(context.interpreter, 6*gas::VERYLOW);
 
     // Step 1: AND (pop x, y; push y&x)
-    popn!([x_val], context.interpreter);
-    popn_top!([], top_ref, context.interpreter);
-    let mut y = *top_ref & x_val;
-    *top_ref = y; // write back
-    let _ =top_ref; // release borrow
-
-    // Step 2: DUP2
-    if !context.interpreter.stack.dup(2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
-    // Step 3: ADD (pop z, add to y)
-    popn!([z_val], context.interpreter);
-    popn_top!([], y_mut, context.interpreter);
-    y = *y_mut + z_val;
-    *y_mut = y;
-    let _ = y_mut;
-
-    // SWAP1
-    if !context.interpreter.stack.exchange(0, 1) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
-    // DUP2
-    if !context.interpreter.stack.dup(2) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
-    // LT
-    popn_top!([a_val], b_ref, context.interpreter);
-    if a_val < *b_ref {
-        *b_ref = U256::ONE;
+    popn!([a], context.interpreter);
+    backn!([b, c], context.interpreter);
+    let tmp = *c;
+    *c = a+*b+*c;
+    if *c < tmp {
+        *b = U256::ONE;
     } else {
-        *b_ref = U256::ZERO;
+        *b = U256::ZERO;
     }
 
     // Skip remaining 5 bytes (pattern length 6)
