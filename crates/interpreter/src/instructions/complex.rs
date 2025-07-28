@@ -323,7 +323,7 @@ pub(super)fn jump_if_zero<WIRE: InterpreterTypes, H: ?Sized>(
 }
 
 /// Super NOP instruction (SNOP)
-pub(super)fn snop<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext<'_, H, WIRE>) {
+pub(super)fn snop<WIRE: InterpreterTypes, H: ?Sized>(_context: InstructionContext<'_, H, WIRE>) {
     // Zero-cost, zero-effect.
     // gas!(context.interpreter, gas::ZERO);
     // Nothing else to do.

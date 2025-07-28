@@ -4,7 +4,6 @@ use lru::LruCache;
 use primitives::B256;
 use bytecode::Bytecode;
 use std::num::NonZeroUsize;
-use thiserror::Error;
 
 const MAX_CACHE_SIZE: usize = 1024 * 128;
 
@@ -13,12 +12,6 @@ static OPCODE_CACHE: Lazy<RwLock<LruCache<B256, Bytecode>>> = Lazy::new(|| {
     const CAP: usize = MAX_CACHE_SIZE;
     RwLock::new(LruCache::new(NonZeroUsize::new(CAP).expect("non-zero")))
 });
-
-#[derive(Debug, Error)]
-pub(crate) enum OpCodeCacheError {
-    #[error("opcode cache miss" )]
-    NotFound,
-}
 
 /// simple interface for outer use
 pub(crate) struct OpCodeCache;
@@ -38,9 +31,9 @@ impl OpCodeCache {
         guard.put(*key, value);
     }
 
-    /// delete
-    pub(crate) fn remove(key: &B256) {
-        let mut guard = OPCODE_CACHE.write();
-        guard.pop(key);
-    }
+    // /// delete
+    // pub(crate) fn remove(key: &B256) {
+    //     let mut guard = OPCODE_CACHE.write();
+    //     guard.pop(key);
+    // }
 }

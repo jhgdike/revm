@@ -1,16 +1,16 @@
 use thiserror::Error;
-use crate::opcode as op;
+use bytecode::opcode as op;
 
 /// superinstruction in revm
 
 /// 自定义优化 opcode 的最小与最大取值范围。
-pub const MIN_OPTIMIZED_OPCODE: u8 = 0xB0;
+pub(crate) const MIN_OPTIMIZED_OPCODE: u8 = 0xB0;
 /// superinstruction max opcode
-pub const MAX_OPTIMIZED_OPCODE: u8 = 0xC8;
+pub(crate) const MAX_OPTIMIZED_OPCODE: u8 = 0xCF;
 
 /// FailPreprocessing Fusion err
 #[derive(Debug, Error)]
-pub enum FusionError {
+pub(crate) enum FusionError {
     #[error("optimized opcode already present (pre-processing fail)")]
     /// Input bytecode already contains optimized opcodes; fusion aborted.
     FailPreprocessing,
@@ -21,7 +21,7 @@ pub enum FusionError {
 /// 1. `code` 本身保持不变，返回新的 `Vec<u8>`；
 /// 2. 若发现字节码中已包含任何优化 opcode（0xB0~0xC8），直接返回 `FusionError::FailPreprocessing`；
 /// 3. 若在遍历过程中遇到 `INVALID`(0xFE) 则提早终止并返回当前结果。
-pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
+pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
     let mut fused = code.to_vec();
     let mut i = 0usize;
     while i < fused.len() {
@@ -33,7 +33,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // 2. 预处理：若已包含优化 opcode，直接报错。
-        if (MIN_OPTIMIZED_OPCODE..=MAX_OPTIMIZED_OPCODE).contains(&fused[cur]) {
+        if fused[cur] <= MIN_OPTIMIZED_OPCODE && fused[cur] >= MAX_OPTIMIZED_OPCODE {
             return Err(FusionError::FailPreprocessing);
         }
 
@@ -56,7 +56,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [2, 3, 5, 6, 7, 12, 13] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 15;
+                i += 16;
                 continue;
             }
         }
@@ -84,7 +84,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 12;
+                i += 13;
                 continue;
             }
         }
@@ -100,7 +100,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 6, 7] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 9;
+                i += 10;
                 continue;
             }
         }
@@ -121,7 +121,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [2, 4, 6, 7] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 7;
+                i += 8;
                 continue;
             }
         }
@@ -142,7 +142,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 3, 4, 5] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 5;
+                i += 6;
                 continue;
             }
         }
@@ -166,7 +166,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 3, 4] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 4;
+                i += 5;
                 continue;
             }
             // (2)
@@ -175,7 +175,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 4] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 4;
+                i += 5;
                 continue;
             }
             // (3)
@@ -184,7 +184,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 4] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 4;
+                i += 5;
                 continue;
             }
         }
@@ -207,7 +207,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 3] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 3;
+                i += 4;
                 continue;
             }
             // (SWAP1 POP SWAP2 SWAP1)
@@ -216,7 +216,7 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 3] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 3;
+                i += 4;
                 continue;
             }
             // (POP SWAP2 SWAP1 POP)
@@ -225,35 +225,35 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 for off in [1, 2, 3] {
                     fused[cur + off] = op::NOP;
                 }
-                i += 3;
+                i += 4;
                 continue;
             }
             // (PUSH2 .. .. JUMP)
             if c(0) == op::PUSH2 && c(3) == op::JUMP {
                 fused[cur] = op::PUSH2JUMP;
                 fused[cur + 3] = op::NOP;
-                i += 3;
+                i += 4;
                 continue;
             }
             // (PUSH2 .. .. JUMPI)
             if c(0) == op::PUSH2 && c(3) == op::JUMPI {
                 fused[cur] = op::PUSH2JUMPI;
                 fused[cur + 3] = op::NOP;
-                i += 3;
+                i += 4;
                 continue;
             }
             // (PUSH1 _ PUSH1)
             if c(0) == op::PUSH1 && c(2) == op::PUSH1 {
                 fused[cur] = op::PUSH1PUSH1;
                 fused[cur + 2] = op::NOP;
-                i += 3;
+                i += 4;
                 continue;
             }
             // (ISZERO PUSH2 .. ..)
             if c(0) == op::ISZERO && c(1) == op::PUSH2 {
                 fused[cur] = op::ISZEROPUSH2;
                 fused[cur + 1] = op::NOP;
-                i += 3;
+                i += 4;
                 continue;
             }
         }
@@ -271,19 +271,19 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
                 if inst2 == op::ADD {
                     fused[cur] = op::PUSH1ADD;
                     fused[cur + 2] = op::NOP;
-                    i += 2;
+                    i += 3;
                     continue;
                 }
                 if inst2 == op::SHL {
                     fused[cur] = op::PUSH1SHL;
                     fused[cur + 2] = op::NOP;
-                    i += 2;
+                    i += 3;
                     continue;
                 }
                 if inst2 == op::DUP1 {
                     fused[cur] = op::PUSH1DUP1;
                     fused[cur + 2] = op::NOP;
-                    i += 2;
+                    i += 3;
                     continue;
                 }
             }
@@ -304,37 +304,37 @@ pub fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if inst0 == op::SWAP1 && inst1 == op::POP {
                 fused[cur] = op::SWAP1POP;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
             if inst0 == op::POP && inst1 == op::JUMP {
                 fused[cur] = op::POPJUMP;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
             if inst0 == op::POP && inst1 == op::POP {
                 fused[cur] = op::POP2;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
             if inst0 == op::SWAP2 && inst1 == op::SWAP1 {
                 fused[cur] = op::SWAP2SWAP1;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
             if inst0 == op::SWAP2 && inst1 == op::POP {
                 fused[cur] = op::SWAP2POP;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
             if inst0 == op::DUP2 && inst1 == op::LT {
                 fused[cur] = op::DUP2LT;
                 fused[cur + 1] = op::NOP;
-                i += 1;
+                i += 2;
                 continue;
             }
         }
@@ -374,22 +374,22 @@ fn calculate_skip_steps(code: &[u8], cur: usize) -> Option<usize> {
 /// BasicBlock represents a sequence of opcodes that can be executed linearly
 /// without any jumps in or out except at the beginning and end.
 #[derive(Debug)]
-pub struct BasicBlock {
+pub(crate) struct BasicBlock {
     /// inclusive start PC
     pub start_pc: usize,
     /// exclusive end PC
     pub end_pc: usize,
     /// raw bytes of opcodes in this block
     pub opcodes: Vec<u8>,
-    /// If this block ends with a jump, the target PC else None
-    pub jump_target: Option<usize>,
+    // /// If this block ends with a jump, the target PC else None
+    // pub jump_target: Option<usize>,
     /// Whether this block starts with a JUMPDEST
     pub is_jump_dest: bool,
 }
 
 impl BasicBlock {
     /// 将整段字节码切分为若干 BasicBlock
-    pub fn generate(code: &[u8]) -> Box<[Self]> {
+    pub(crate) fn generate(code: &[u8]) -> Box<[Self]> {
         if code.is_empty() {
             return Vec::new().into_boxed_slice();
         }
@@ -431,7 +431,7 @@ impl BasicBlock {
                     start_pc: pc,
                     end_pc: 0,
                     opcodes: Vec::new(),
-                    jump_target: None,
+                    // jump_target: None,
                     is_jump_dest: op == op::JUMPDEST,
                 });
             } else if current.is_none() {
@@ -439,13 +439,13 @@ impl BasicBlock {
                     start_pc: pc,
                     end_pc: 0,
                     opcodes: Vec::new(),
-                    jump_target: None,
+                    // jump_target: None,
                     is_jump_dest: op == op::JUMPDEST,
                 });
             }
 
             // Determine instruction length
-            let (inst_len, has_immediate) = if let Some(skip) = calculate_skip_steps(code, pc) {
+            let (inst_len, _has_immediate) = if let Some(skip) = calculate_skip_steps(code, pc) {
                 (1 + skip, true)
             } else {
                 (1, false)
@@ -470,16 +470,16 @@ impl BasicBlock {
                 if let Some(mut blk) = current.take() {
                     blk.end_pc = pc;
                     // 处理无条件跳转目标（JUMP / RJUMP / JUMPF）
-                    if (op == op::JUMP) && has_immediate {
-                        let imm_start = blk.opcodes.len() - (inst_len - 1); // 跳过 opcode 本身
-                        let imm_bytes = &blk.opcodes[imm_start..];
-                        // 截取低 8 字节转 usize
-                        let mut tgt: usize = 0;
-                        for &b in imm_bytes.iter().rev().take(8) {
-                            tgt = (tgt << 8) | b as usize;
-                        }
-                        blk.jump_target = Some(tgt);
-                    }
+                    // if (op == op::JUMP) && has_immediate {
+                    //     let imm_start = blk.opcodes.len() - (inst_len - 1); // 跳过 opcode 本身
+                    //     let imm_bytes = &blk.opcodes[imm_start..];
+                    //     // 截取低 8 字节转 usize
+                    //     let mut tgt: usize = 0;
+                    //     for &b in imm_bytes.iter().rev().take(8) {
+                    //         tgt = (tgt << 8) | b as usize;
+                    //     }
+                    //     blk.jump_target = Some(tgt);
+                    // }
                     blocks.push(blk);
                     current = None;
                 }
@@ -517,7 +517,16 @@ fn is_block_terminator(op: u8) -> bool {
 /// * 若字节码为空或基本块产生失败，则返回 `FusionError::FailPreprocessing`；
 /// * 如发现任何块中已出现优化 opcode（0xB0–0xC8），立即返回同样错误；
 /// * 否则仅对选定类型的基本块执行融合，其余保持原状。
-pub fn do_cfg_based_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
+pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
+    for byte in code {
+        if *byte >= MIN_OPTIMIZED_OPCODE && *byte < MAX_OPTIMIZED_OPCODE {
+            print!("{:?}", byte);
+            return Err(FusionError::FailPreprocessing);
+        }
+    }
+    // if (MIN_OPTIMIZED_OPCODE..=MAX_OPTIMIZED_OPCODE).contains(&byte) {
+    //     return Err(FusionError::FailPreprocessing);
+    // }
     // 生成基本块
     let blocks = BasicBlock::generate(code);
     if blocks.is_empty() {
@@ -535,6 +544,7 @@ pub fn do_cfg_based_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             continue;
         }
 
+        print!("{:?} - {:?}\n", block.start_pc, block.end_pc);
         // ---------- 预扫描：检测优化 opcode ----------
         let mut pc = block.start_pc;
         while pc < block.end_pc && pc < code.len() {
@@ -627,4 +637,54 @@ fn fuse_block(code: &mut [u8], block: &BasicBlock) -> Result<(), FusionError> {
         code[start..end].copy_from_slice(&fused_slice);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::fs;
+    use primitives::{Bytes, hex};
+    use crate::opcode_optimizer::is_block_terminator;
+
+    #[test]
+    fn test_is_block_terminator() {
+        assert_eq!(is_block_terminator(op::STOP), true);
+        assert_eq!(is_block_terminator(op::RETURN), true);
+        assert_eq!(is_block_terminator(op::REVERT), true);
+        assert_eq!(is_block_terminator(op::SELFDESTRUCT), true);
+        assert_eq!(is_block_terminator(op::JUMP), true);
+        assert_eq!(is_block_terminator(op::JUMPI), true);
+
+        assert_ne!(is_block_terminator(op::ADD), true);
+        assert_ne!(is_block_terminator(op::GT), true);
+        assert_ne!(is_block_terminator(op::ADDMOD), true);
+        assert_ne!(is_block_terminator(op::LT), true);
+        assert_ne!(is_block_terminator(op::PUSH1), true);
+    }
+
+    #[test]
+    fn test_do_fusion() {
+        let code = load_bytecode("/Users/wangtao/git_repo/revm_task/benchmark_test/bytecode/busd.bin");
+        match do_code_fusion(code.as_ref()) {
+            Ok(bytecode) => println!("{:?}", bytecode),
+            Err(e) => panic!("{:?}", e),
+        }
+
+        match do_basic_block_opcode_fusion(code.as_ref()) {
+            Ok(bytecode) => println!("{:?}", bytecode),
+            Err(e) => panic!("{:?}", e),
+        }
+    }
+
+    fn load_bytecode(path: &str) -> Bytes {
+        let bytecode_str = fs::read_to_string(path)
+            .expect("Failed to read bytecode file");
+        let bytecode_str = bytecode_str.trim();
+    
+        if bytecode_str.starts_with("0x") {
+            hex::decode(&bytecode_str[2..]).expect("Invalid hex in bytecode").into()
+        } else {
+            hex::decode(bytecode_str).expect("Invalid hex in bytecode").into()
+        }
+    }
 }

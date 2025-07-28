@@ -20,9 +20,6 @@ pub mod legacy;
 pub mod opcode;
 pub mod utils;
 
-/// superinstruction
-pub mod opcode_optimizer;
-
 /// Re-export of bitvec crate, used to store legacy bytecode jump table.
 pub use bitvec;
 pub use bytecode::Bytecode;

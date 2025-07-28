@@ -111,9 +111,9 @@ macro_rules! resize_memory {
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! popn {
-    ([ $($x:ident),* ],$interpreterreter:expr $(,$ret:expr)? ) => {
-        let Some([$( $x ),*]) = $interpreterreter.stack.popn() else {
-            $interpreterreter.halt($crate::InstructionResult::StackUnderflow);
+    ([ $($x:ident),* ],$interpreter:expr $(,$ret:expr)? ) => {
+        let Some([$( $x ),*]) = $interpreter.stack.popn() else {
+            $interpreter.halt($crate::InstructionResult::StackUnderflow);
             return $($ret)?;
         };
     };
@@ -132,23 +132,23 @@ macro_rules! count {
 #[macro_export]
 macro_rules! backn {
     ([$($x:ident),*], $interpreter:expr $(,$ret:item)?) => {
-        let Some([$( mut $x ),*]) = $interpreter.stack.backn::<{ count!($($x),*) }>() else {
+        let Some([$( $x ),*]) = $interpreter.stack.backn::<{ count!($($x),*) }>() else {
             $interpreter.halt($crate::InstructionResult::StackUnderflow);
             return $($ret)?;
         };
     }
 }
 
-/// Pops n values from the stack and returns the top value. Fails the instruction if n values can't be popped.
-#[macro_export]
-macro_rules! popn_top {
-    ([ $($x:ident),* ], $top:ident, $interpreter:expr $(,$ret:expr)? ) => {
-        let Some(([$( $x ),*], $top)) = $interpreter.stack.popn_top() else {
-            $interpreter.halt($crate::InstructionResult::StackUnderflow);
-            return $($ret)?;
-        };
-    };
-}
+// /// Pops n values from the stack and returns the top value. Fails the instruction if n values can't be popped.
+// #[macro_export]
+// macro_rules! popn_top {
+//     ([ $($x:ident),* ], $top:ident, $interpreter:expr $(,$ret:expr)? ) => {
+//         let Some(([$( $x ),*], $top)) = $interpreter.stack.popn_top() else {
+//             $interpreter.halt($crate::InstructionResult::StackUnderflow);
+//             return $($ret)?;
+//         };
+//     };
+// }
 
 #[doc(hidden)]
 #[macro_export]

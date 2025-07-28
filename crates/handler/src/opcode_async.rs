@@ -1,5 +1,6 @@
 use crate::opcode_cache::OpCodeCache;
-use bytecode::{opcode_optimizer, Bytecode};
+use crate::opcode_optimizer::do_code_fusion;
+use bytecode::Bytecode;
 use once_cell::sync::Lazy;
 use primitives::{B256, Bytes};
 use std::sync::mpsc::{self, Sender};
@@ -8,7 +9,7 @@ use std::thread;
 #[derive(Clone, Copy)]
 enum OptimizeTaskType {
     Generate,
-    Delete,
+    // Delete,
 }
 
 /// 后台工作线程的发送端。
@@ -23,15 +24,18 @@ static CODE_FUSION_TX: Lazy<Sender<(OptimizeTaskType, B256, Bytes)>> = Lazy::new
             while let Ok((typ, hash, code)) = rx.recv() {
                 match typ {
                     OptimizeTaskType::Generate => {
-                        if let Ok(fused_vec) = opcode_optimizer::do_cfg_based_opcode_fusion(&code) {
-                            let fused = Bytecode::new_raw(Bytes::from(fused_vec));
-                            OpCodeCache::insert(&hash, fused);
+                        match do_code_fusion(&code) {
+                            Ok(fused_vec) => {
+                                let fused = Bytecode::new_raw(Bytes::from(fused_vec));
+                                OpCodeCache::insert(&hash, fused);
+                            },
+                            Err(e) => print!("failed: {:?}\n", e),
                         }
                     }
-                    OptimizeTaskType::Delete => {
-                        // 目前未实现删除逻辑，可在此扩展。
-                        OpCodeCache::remove(&hash);
-                    }
+                    // OptimizeTaskType::Delete => {
+                    //     // 目前未实现删除逻辑，可在此扩展。
+                    //     OpCodeCache::remove(&hash);
+                    // }
                 }
             }
         })

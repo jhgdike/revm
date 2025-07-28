@@ -3807,7 +3807,6 @@ dependencies = [
  "phf",
  "revm-primitives",
  "serde",
- "thiserror 1.0.69",
 ]
 
 [[package]]

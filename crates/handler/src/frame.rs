@@ -1,6 +1,6 @@
 use crate::evm::FrameTr;
 use crate::item_or_result::FrameInitOrResult;
-use crate::opcode_compiler::{get_optimized_code, send_optimized_code};
+use crate::opcode_async::{get_optimized_code, send_optimized_code};
 use crate::{precompile_provider::PrecompileProvider, ItemOrResult};
 use crate::{CallFrame, CreateFrame, FrameData, FrameResult};
 use context::result::FromStringError;
@@ -258,6 +258,7 @@ impl EthFrame<EthInterpreter> {
             return return_result(InstructionResult::Stop);
         }
         if !cache_hit {
+            // print!("{}", cache_hit);
             send_optimized_code(&code_hash, bytecode.bytes_slice());
         }
         // let (bytecode, cache_hit) = gen_or_rewrite_optimized_code(&code_hash, bytecode);
@@ -363,6 +364,7 @@ impl EthFrame<EthInterpreter> {
             Bytecode::new_legacy(inputs.init_code.clone()),
             init_code_hash,
         );
+        send_optimized_code(&init_code_hash, bytecode.bytes_slice());
 
         let interpreter_input = InputsImpl {
             target_address: created_address,
