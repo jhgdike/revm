@@ -127,7 +127,7 @@ macro_rules! count {
     ($x:ident, $($rest:ident),*) => (1 + count!($($rest),*));
 }
 
-/// 使用backn取n个数，如backn([a, b, c, d]), 分别对应interpreter.stack.back(1), back(2), back(3), back(4)
+/// 使用backn取n个数，如backn([a, b, c, d]), 分别对应interpreter.stack.back(4), back(3), back(2), back(1)
 /// back(1) 相当于是top(0)
 #[macro_export]
 macro_rules! backn {

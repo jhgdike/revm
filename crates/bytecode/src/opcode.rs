@@ -576,8 +576,8 @@ opcodes! {
     0xB2 => SWAP2SWAP1POPJUMP      => stack_io(3, 3);
     0xB3 => SWAP1POPSWAP2SWAP1         => stack_io(4, 4);
     0xB4 => POPSWAP2SWAP1POP           => stack_io(4, 4);
-    0xB5 => PUSH2JUMP                  => stack_io(0, 0);
-    0xB6 => PUSH2JUMPI                 => stack_io(1, 0);
+    0xB5 => PUSH2JUMP                  => stack_io(1, 1), immediate_size(2);
+    0xB6 => PUSH2JUMPI                 => stack_io(1, 2), immediate_size(2);
     0xB7 => PUSH1PUSH1                 => stack_io(0, 2);
     0xB8 => PUSH1ADD                   => stack_io(1, 1);
     0xB9 => PUSH1SHL                   => stack_io(1, 1);

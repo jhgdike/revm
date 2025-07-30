@@ -3918,6 +3918,7 @@ name = "revm-interpreter"
 version = "24.0.0"
 dependencies = [
  "bincode 2.0.1",
+ "bitvec",
  "revm-bytecode",
  "revm-context-interface",
  "revm-primitives",

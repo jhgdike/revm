@@ -22,6 +22,7 @@ pub(crate) enum FusionError {
 /// 2. 若发现字节码中已包含任何优化 opcode（0xB0~0xC8），直接返回 `FusionError::FailPreprocessing`；
 /// 3. 若在遍历过程中遇到 `INVALID`(0xFE) 则提早终止并返回当前结果。
 pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
+    return Ok(code.to_vec());
     let mut fused = code.to_vec();
     let mut i = 0usize;
     while i < fused.len() {
@@ -54,7 +55,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             {
                 fused[cur] = op::PUSH1CALLDATALOADPUSH1SHRDUP1PUSH4GTPUSH2;
                 for off in [2, 3, 5, 6, 7, 12, 13] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 16;
                 continue;
@@ -82,7 +83,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             {
                 fused[cur] = op::SWAP1PUSH1DUP1NOTSWAP2ADDANDDUP2ADDSWAP1DUP2LT;
                 for off in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 13;
                 continue;
@@ -98,7 +99,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::DUP1 && c(1) == op::PUSH4 && c(6) == op::EQ && c(7) == op::PUSH2 {
                 fused[cur] = op::DUP1PUSH4EQPUSH2;
                 for off in [1, 6, 7] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 10;
                 continue;
@@ -119,7 +120,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             {
                 fused[cur] = op::PUSH1PUSH1PUSH1SHLSUB;
                 for off in [2, 4, 6, 7] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 8;
                 continue;
@@ -140,7 +141,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             {
                 fused[cur] = op::ANDDUP2ADDSWAP1DUP2LT;
                 for off in [1, 2, 3, 4, 5] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 6;
                 continue;
@@ -164,7 +165,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             {
                 fused[cur] = op::ANDSWAP1POPSWAP2SWAP1;
                 for off in [1, 2, 3, 4] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 5;
                 continue;
@@ -173,7 +174,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::ISZERO && c(1) == op::PUSH2 && c(4) == op::JUMPI {
                 fused[cur] = op::JUMPIFZERO;
                 for off in [1, 4] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 5;
                 continue;
@@ -182,7 +183,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::DUP2 && c(1) == op::MSTORE && c(2) == op::PUSH1 && c(4) == op::ADD {
                 fused[cur] = op::DUP2MSTOREPUSH1ADD;
                 for off in [1, 2, 4] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 5;
                 continue;
@@ -205,7 +206,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::SWAP2 && c(1) == op::SWAP1 && c(2) == op::POP && c(3) == op::JUMP {
                 fused[cur] = op::SWAP2SWAP1POPJUMP;
                 for off in [1, 2, 3] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 4;
                 continue;
@@ -214,7 +215,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::SWAP1 && c(1) == op::POP && c(2) == op::SWAP2 && c(3) == op::SWAP1 {
                 fused[cur] = op::SWAP1POPSWAP2SWAP1;
                 for off in [1, 2, 3] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 4;
                 continue;
@@ -223,7 +224,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if c(0) == op::POP && c(1) == op::SWAP2 && c(2) == op::SWAP1 && c(3) == op::POP {
                 fused[cur] = op::POPSWAP2SWAP1POP;
                 for off in [1, 2, 3] {
-                    fused[cur + off] = op::NOP;
+                    fused[cur + off] = op::SNOP;
                 }
                 i += 4;
                 continue;
@@ -231,28 +232,28 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             // (PUSH2 .. .. JUMP)
             if c(0) == op::PUSH2 && c(3) == op::JUMP {
                 fused[cur] = op::PUSH2JUMP;
-                fused[cur + 3] = op::NOP;
+                fused[cur + 3] = op::SNOP;
                 i += 4;
                 continue;
             }
             // (PUSH2 .. .. JUMPI)
             if c(0) == op::PUSH2 && c(3) == op::JUMPI {
                 fused[cur] = op::PUSH2JUMPI;
-                fused[cur + 3] = op::NOP;
+                fused[cur + 3] = op::SNOP;
                 i += 4;
                 continue;
             }
             // (PUSH1 _ PUSH1)
             if c(0) == op::PUSH1 && c(2) == op::PUSH1 {
                 fused[cur] = op::PUSH1PUSH1;
-                fused[cur + 2] = op::NOP;
+                fused[cur + 2] = op::SNOP;
                 i += 4;
                 continue;
             }
             // (ISZERO PUSH2 .. ..)
             if c(0) == op::ISZERO && c(1) == op::PUSH2 {
                 fused[cur] = op::ISZEROPUSH2;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 4;
                 continue;
             }
@@ -270,19 +271,19 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             if inst0 == op::PUSH1 {
                 if inst2 == op::ADD {
                     fused[cur] = op::PUSH1ADD;
-                    fused[cur + 2] = op::NOP;
+                    fused[cur + 2] = op::SNOP;
                     i += 3;
                     continue;
                 }
                 if inst2 == op::SHL {
                     fused[cur] = op::PUSH1SHL;
-                    fused[cur + 2] = op::NOP;
+                    fused[cur + 2] = op::SNOP;
                     i += 3;
                     continue;
                 }
                 if inst2 == op::DUP1 {
                     fused[cur] = op::PUSH1DUP1;
-                    fused[cur + 2] = op::NOP;
+                    fused[cur + 2] = op::SNOP;
                     i += 3;
                     continue;
                 }
@@ -303,37 +304,37 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             let inst1 = fused[cur + 1];
             if inst0 == op::SWAP1 && inst1 == op::POP {
                 fused[cur] = op::SWAP1POP;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
             if inst0 == op::POP && inst1 == op::JUMP {
                 fused[cur] = op::POPJUMP;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
             if inst0 == op::POP && inst1 == op::POP {
                 fused[cur] = op::POP2;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
             if inst0 == op::SWAP2 && inst1 == op::SWAP1 {
                 fused[cur] = op::SWAP2SWAP1;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
             if inst0 == op::SWAP2 && inst1 == op::POP {
                 fused[cur] = op::SWAP2POP;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
             if inst0 == op::DUP2 && inst1 == op::LT {
                 fused[cur] = op::DUP2LT;
-                fused[cur + 1] = op::NOP;
+                fused[cur + 1] = op::SNOP;
                 i += 2;
                 continue;
             }
@@ -642,8 +643,9 @@ fn fuse_block(code: &mut [u8], block: &BasicBlock) -> Result<(), FusionError> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use bytecode::Bytecode;
     use std::fs;
-    use primitives::{Bytes, hex};
+    use primitives::{hex::{self, ToHexExt}, Bytes};
     use crate::opcode_optimizer::is_block_terminator;
 
     #[test]
@@ -664,16 +666,18 @@ mod test {
 
     #[test]
     fn test_do_fusion() {
-        let code = load_bytecode("/Users/wangtao/git_repo/revm_task/benchmark_test/bytecode/busd.bin");
-        match do_code_fusion(code.as_ref()) {
-            Ok(bytecode) => println!("{:?}", bytecode),
+        let code = load_bytecode("/Users/wangtao/git_repo/revm_task/benchmark_test/bytecode/BIGA.bin");
+        // println!("{:?}", Bytecode::new_raw(Bytes::from(code.clone())).legacy_jump_table().unwrap().as_slice());
+        match do_basic_block_opcode_fusion(code.as_ref()) {
+            // Ok(bytecode) => println!("{:?}", Bytecode::new_raw(Bytes::from(bytecode.clone())).legacy_jump_table().unwrap().as_slice()),
+            Ok(bytecode) => println!("{:?}", bytecode.encode_hex()),
             Err(e) => panic!("{:?}", e),
         }
 
-        match do_basic_block_opcode_fusion(code.as_ref()) {
-            Ok(bytecode) => println!("{:?}", bytecode),
-            Err(e) => panic!("{:?}", e),
-        }
+        // match do_basic_block_opcode_fusion(code.as_ref()) {
+        //     Ok(bytecode) => println!("{:?}", bytecode),
+        //     Err(e) => panic!("{:?}", e),
+        // }
     }
 
     fn load_bytecode(path: &str) -> Bytes {

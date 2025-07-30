@@ -30,9 +30,10 @@ pub(super)fn and_swap1_pop_swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(
     popn!([a, b], context.interpreter);
     let r = a & b;
     backn!([c, d, e], context.interpreter);
-    *c = *d;
-    *d = *e;
-    *e = r;
+
+    *e = *d;
+    *d = *c;
+    *c = r;
 
     context.interpreter.bytecode.relative_jump(4);
 }
@@ -61,7 +62,7 @@ pub(super) fn swap2_swap1_pop_jump<WIRE: InterpreterTypes, H: ?Sized>(
         return;
     }
     // Perform absolute jump
-    context.interpreter.bytecode.absolute_jump(dest-1);
+    context.interpreter.bytecode.absolute_jump(dest);
     // context.interpreter.bytecode.absolute_jump(dest);
 }
 
@@ -88,9 +89,9 @@ pub(super) fn swap1_pop_swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(
     // }
     popn!([a], context.interpreter);
     backn!([b, c, d], context.interpreter);
-    *b = *c;
-    *c = *d;
-    *d = a;
+    *d = *c;
+    *c = *b;
+    *b = a;
 
     // Skip over the remaining 3 bytes of the original sequence
     context.interpreter.bytecode.relative_jump(3);
@@ -105,7 +106,7 @@ pub(super)fn pop_swap2_swap1_pop<WIRE: InterpreterTypes, H: ?Sized>(
 
     // Discard first value, keep `b`
     popn!([ _discard, b ], context.interpreter);
-    backn!([c, d], context.interpreter);
+    backn!([d, c], context.interpreter);
     *c = *d;
     *d = b;
 
@@ -126,7 +127,7 @@ pub(super)fn push2_jump<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionC
         context.interpreter.halt(InstructionResult::InvalidJump);
         return;
     }
-    context.interpreter.bytecode.absolute_jump(dest-1);
+    context.interpreter.bytecode.absolute_jump(dest);
 }
 
 /// Fused instruction: PUSH2 <imm16> JUMPI
@@ -149,7 +150,7 @@ pub(super)fn push2_jumpi<WIRE: InterpreterTypes, H: ?Sized>(context: Instruction
             context.interpreter.halt(InstructionResult::InvalidJump);
             return;
         }
-        context.interpreter.bytecode.absolute_jump(dest-1);
+        context.interpreter.bytecode.absolute_jump(dest);
     } else {
         // Skip imm16 + NOP (total 3 bytes ahead of current pointer)
         context.interpreter.bytecode.relative_jump(3);
@@ -233,7 +234,7 @@ pub(super)fn pop_jump<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCon
         context.interpreter.halt(InstructionResult::InvalidJump);
         return;
     }
-    context.interpreter.bytecode.absolute_jump(dest-1);
+    context.interpreter.bytecode.absolute_jump(dest);
 }
 
 /// Fused instruction: POP POP
@@ -246,7 +247,7 @@ pub(super)fn pop2<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext
 /// Fused instruction: SWAP2 SWAP1
 pub(super)fn swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionContext<'_, H, WIRE>) {
     gas!(context.interpreter, 2*gas::VERYLOW);
-    backn!([a, b, c], context.interpreter);
+    backn!([c, b, a], context.interpreter);
     let tmp = *a;
     *a = *b;
     *b = *c;
@@ -271,7 +272,7 @@ pub(super)fn swap2_pop<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCo
     //     context.interpreter.halt(InstructionResult::StackUnderflow);
     //     return;
     // }
-    backn!([a, _b, c], context.interpreter);
+    backn!([c, _b, a], context.interpreter);
     *c = *a;
     // Pop the (now) top value
     popn!([ _x ], context.interpreter);
@@ -290,7 +291,7 @@ pub(super)fn dup2_lt<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCont
 
     // Pop the two operands
     // popn!([a, b], context.interpreter);
-    backn!([a, b], context.interpreter);
+    backn!([b, a], context.interpreter);
     *a = if *b < *a { U256::ONE } else { U256::ZERO };
     // push!(context.interpreter, result);
 
@@ -309,13 +310,15 @@ pub(super)fn jump_if_zero<WIRE: InterpreterTypes, H: ?Sized>(
 
     if value.is_zero() {
         // Immediate destination is 2 bytes located 2 bytes ahead (skip NOP + imm16)
-        let dest = context.interpreter.bytecode.read_offset_u16(2) as usize;
+        let dest = context.interpreter.bytecode.read_offset_u16(1) as usize;
         // let dest = dest_u16 as usize;
         if !context.interpreter.bytecode.is_valid_legacy_jump(dest) {
             context.interpreter.halt(InstructionResult::InvalidJump);
             return;
         }
-        context.interpreter.bytecode.absolute_jump(dest-1);
+        // println!("{:?}, {:?}", dest, context.interpreter.stack.len());
+        // println!("{:?}, {:?}", context.interpreter.bytecode.read_offset_u16(3), context.interpreter.bytecode.read_offset_u16(5));
+        context.interpreter.bytecode.absolute_jump(dest);
     } else {
         // Skip the rest (NOP + imm16 + NOP) => 4 bytes
         context.interpreter.bytecode.relative_jump(4);
@@ -559,7 +562,7 @@ pub(super)fn swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt<
     //     return;
     // }
 
-    backn!([a,b], context.interpreter);
+    backn!([b,a], context.interpreter);
 
     // 2. PUSH1 immediate (byte index 2)
     let imm = context.interpreter.bytecode.read_slice(2)[1];
@@ -585,7 +588,7 @@ pub(super)fn and_dup2_add_swap1_dup2_lt<WIRE: InterpreterTypes, H: ?Sized>(
 
     // Step 1: AND (pop x, y; push y&x)
     popn!([a], context.interpreter);
-    backn!([b, c], context.interpreter);
+    backn!([c, b], context.interpreter);
     let tmp = *c;
     *c = a+*b+*c;
     if *c < tmp {
@@ -599,4 +602,166 @@ pub(super)fn and_dup2_add_swap1_dup2_lt<WIRE: InterpreterTypes, H: ?Sized>(
 }
 
 
+#[cfg(test)]
+mod fused_tests {
+    use super::*;
+    use crate::{interpreter, InstructionContext};
+    use crate::interpreter::{Interpreter, EthInterpreter, ExtBytecode};
+    use crate::instructions::{bitwise, stack, control};
+    use bitvec::{bitvec, order::Lsb0, vec::BitVec};
+    use bytecode::{Bytecode, JumpTable};
+    use primitives::Bytes;
 
+    type Interp = Interpreter<EthInterpreter>;   // 简写
+
+    // helper
+    fn make_interp(len: usize) -> Interp {
+        let mut i = Interp::default_ext();
+        // 直接新建一段原始字节码并替换
+        let dummy = Bytecode::new_legacy(Bytes::from(vec![0u8; len]));
+        i.bytecode = ExtBytecode::new(dummy);   // 字段是 pub，可整体赋值
+        i
+    }
+
+    fn make_interp_with_jump(len: usize, jump_loc: usize) -> Interp {
+        let mut i = Interp::default_ext();
+        let mut jumps: BitVec<u8> = bitvec![u8, Lsb0; 0; len];
+        unsafe {jumps.set_unchecked(jump_loc, true) }
+        // 直接新建一段原始字节码并替换
+        let dummy = Bytecode::new_analyzed(Bytes::from(vec![0u8; len]), len, JumpTable::new(jumps));
+        i.bytecode = ExtBytecode::new(dummy);   // 字段是 pub，可整体赋值
+        i
+    }
+
+    // run 把 ctx 以可变借用传入闭包
+    fn run<F>(mut interp: Interp, f: F) -> (Interp, usize)
+    where F: FnOnce(&mut Interp) {
+        f(&mut interp);
+        let pc = interp.bytecode.pc();
+        (interp, pc)
+    }
+
+    #[test]
+    fn test_and_swap1_pop_swap2_swap1() {
+        let (interp, pc) = run(make_interp(10), |ip| {
+            // 预填 5 元素满足函数前置条件
+            for n in 0..3 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            let _ = ip.stack.push(U256::from(7));
+            let _ = ip.stack.push(U256::from(5));
+            and_swap1_pop_swap2_swap1(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, pc2) = run(make_interp(10), |ip| {
+            // 预填 5 元素满足函数前置条件
+            for n in 0..3 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            let _ = ip.stack.push(U256::from(7));
+            let _ = ip.stack.push(U256::from(5));
+            println!("{:?}", ip.stack);
+            bitwise::bitand(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}", ip.stack);
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}", ip.stack);
+            stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}", ip.stack);
+            stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}", ip.stack);
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}", ip.stack);
+        });
+        assert_eq!(pc, 4); // 函数内 relative_jump(4)
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_swap1_pop_swap2_swap1() {
+        let (interp, pc) = run(make_interp(10), |ip| {
+            // 预填 5 元素满足函数前置条件
+            for n in 0..3 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            let _ = ip.stack.push(U256::from(7));
+            let _ = ip.stack.push(U256::from(5));
+            swap1_pop_swap2_swap1(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, pc2) = run(make_interp(10), |ip| {
+            // 预填 5 元素满足函数前置条件
+            for n in 0..3 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            let _ = ip.stack.push(U256::from(7));
+            let _ = ip.stack.push(U256::from(5));
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(pc, 3); // 函数内 relative_jump(4)
+        // assert_eq!(pc2, 3); // 函数内 relative_jump(4)
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_swap2_swap1_pop_jump() {
+        let (interp, pc) = run(make_interp_with_jump(10, 7), |ip| {
+            // 栈: [dest, keep, discard, extra...]
+            let _ = ip.stack.push(U256::from(7)); // jump dest
+            let _ = ip.stack.push(U256::from(0xaa));
+            let _ = ip.stack.push(U256::from(0xbb));
+            println!("{:?}", ip.stack);
+            swap2_swap1_pop_jump(InstructionContext{ host: &mut (), interpreter: ip });
+            println!("{:?}, {:?}", ip.stack, ip.bytecode.pc());
+        });
+        let (interp2, pc2) = run(make_interp_with_jump(10, 7), |ip| {
+            // 栈: [dest, keep, discard, extra...]
+            let _ = ip.stack.push(U256::from(7)); // jump dest
+            let _ = ip.stack.push(U256::from(0xaa));
+            let _ = ip.stack.push(U256::from(0xbb));
+            stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
+            control::jump(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 函数将 absolute_jump(dest-1) ⇒ 6
+        assert_eq!(pc, 7);
+        assert_eq!(pc2, 7);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_push1_add() {
+        let (mut interp, pc) = run(make_interp(4), |ip| {
+            // 栈顶 b=1
+            let _ = ip.stack.push(U256::ONE);
+            // 构造 fake bytecode: [imm, NOP]
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![5,0,0,0].into()));
+            push1_add(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(6));
+        assert_eq!(pc, 2);
+    }
+
+    #[test]
+    fn test_pop2() {
+        let (interp, pc) = run(make_interp(2), |ip| {
+            let _ = ip.stack.push(U256::from(1));
+            let _ = ip.stack.push(U256::from(2));
+            pop2(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert!(interp.stack.is_empty());
+        assert_eq!(pc, 1);
+    }
+
+    #[test]
+    fn test_dup2_lt() {
+        let (mut interp, pc) = run(make_interp(2), |ip| {
+            let _ = ip.stack.push(U256::from(3));
+            let _ = ip.stack.push(U256::from(4)); // top
+            dup2_lt(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::ONE); // 4 < 3 false, but after swap → comparison 3<4 ⇒ true
+        assert_eq!(pc, 1);
+    }
+}

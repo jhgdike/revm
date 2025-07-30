@@ -1,4 +1,4 @@
-use crate::{interpreter_types::Jumps, Interpreter, InterpreterTypes};
+use crate::{interpreter_types::{Immediates, Jumps}, Interpreter, InterpreterTypes};
 
 use super::Instruction;
 
@@ -36,6 +36,7 @@ impl<H: ?Sized, ITy: InterpreterTypes> InstructionContext<'_, H, ITy> {
         self.interpreter.bytecode.relative_jump(1);
 
         // Execute instruction.
+        print!("{:?}, ", opcode);
         instruction_table[opcode as usize](self)
     }
 }
