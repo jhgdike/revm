@@ -403,16 +403,15 @@ pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
         context.interpreter.halt(InstructionResult::StackUnderflow);
         return;
     }
+    context.interpreter.bytecode.relative_jump(1);
 
     // Read 4-byte constant (offsets 2-5 from current ptr)
-    let bytes4 = {
-        let slice = context.interpreter.bytecode.read_slice(6);
-        [slice[2], slice[3], slice[4], slice[5]]
-    };
+    let bytes4 = context.interpreter.bytecode.read_slice(4);
     let const_val = U256::from_be_slice(&bytes4);
     backn!([x], context.interpreter);
     *x = if const_val == *x {U256::ONE} else { U256::ZERO }; 
     // push!(context.interpreter, const_val);
+    context.interpreter.bytecode.relative_jump(6);
 
     // // Equality check
     // popn!([a, x], context.interpreter); // a = const_val, x = duplicated original
@@ -420,11 +419,11 @@ pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
     // push!(context.interpreter, eq);
 
     // Read 2-byte immediate for PUSH2 (offset 8-9 from current ptr)
-    let dest_u16 = context.interpreter.bytecode.read_offset_u16(7);
+    let dest_u16 = context.interpreter.bytecode.read_u16();
     push!(context.interpreter, U256::from(dest_u16));
 
     // Skip remaining bytes to end of fused sequence (total 10 ⇒ skip 9)
-    context.interpreter.bytecode.relative_jump(9);
+    context.interpreter.bytecode.relative_jump(2);
 }
 
 #[inline]
@@ -565,18 +564,26 @@ pub(super)fn swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt<
     backn!([b,a], context.interpreter);
 
     // 2. PUSH1 immediate (byte index 2)
-    let imm = context.interpreter.bytecode.read_slice(2)[1];
+    context.interpreter.bytecode.relative_jump(1);
+    let imm = context.interpreter.bytecode.read_u8();
+    println!("{:?}", imm);
     // push!(context.interpreter, U256::from(imm));
-    *b = *a+*b+U256::from(imm)+U256::from(!imm);
+    // b, a, im, ~im
+    // a, ~im & im+b, a
+    let imm = U256::from(imm);
+    let tmp = (!imm & (imm+*b)) + *a;
+    println!("{:?}", tmp);
+    // *a = *b;
 
-    if *b < *a {
+    if tmp < *b {
         *a = U256::ONE;
     } else {
         *a = U256::ZERO;
     }
+    *b = tmp;
 
     // Skip remaining 12 bytes (pattern length 13)
-    context.interpreter.bytecode.relative_jump(12);
+    context.interpreter.bytecode.relative_jump(11);
 }
 
 /// Fused instruction: AND DUP2 ADD SWAP1 DUP2 LT
@@ -607,7 +614,7 @@ mod fused_tests {
     use super::*;
     use crate::{interpreter, InstructionContext};
     use crate::interpreter::{Interpreter, EthInterpreter, ExtBytecode};
-    use crate::instructions::{bitwise, stack, control};
+    use crate::instructions::{bitwise, stack, control, arithmetic, memory, system};
     use bitvec::{bitvec, order::Lsb0, vec::BitVec};
     use bytecode::{Bytecode, JumpTable};
     use primitives::Bytes;
@@ -627,8 +634,12 @@ mod fused_tests {
         let mut i = Interp::default_ext();
         let mut jumps: BitVec<u8> = bitvec![u8, Lsb0; 0; len];
         unsafe {jumps.set_unchecked(jump_loc, true) }
+        let mut v = vec![0u8; len];
+        for i in 0..len-1 {
+            v[i] = i as u8;
+        }
         // 直接新建一段原始字节码并替换
-        let dummy = Bytecode::new_analyzed(Bytes::from(vec![0u8; len]), len, JumpTable::new(jumps));
+        let dummy = Bytecode::new_analyzed(Bytes::from(v), len, JumpTable::new(jumps));
         i.bytecode = ExtBytecode::new(dummy);   // 字段是 pub，可整体赋值
         i
     }
@@ -643,7 +654,7 @@ mod fused_tests {
 
     #[test]
     fn test_and_swap1_pop_swap2_swap1() {
-        let (interp, pc) = run(make_interp(10), |ip| {
+        let (mut interp, pc) = run(make_interp(10), |ip| {
             // 预填 5 元素满足函数前置条件
             for n in 0..3 {
                 let _ = ip.stack.push(U256::from(n));
@@ -731,6 +742,103 @@ mod fused_tests {
     }
 
     #[test]
+    fn test_pop_swap2_swap1_pop() {
+        let (interp, pc) = run(make_interp(10), |ip| {
+            for n in 0..4 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            pop_swap2_swap1_pop(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, _pc2) = run(make_interp(10), |ip| {
+            for n in 0..4 {
+                let _ = ip.stack.push(U256::from(n));
+            }
+            stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(pc, 3);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_swap2_pop() {
+        let (interp, pc) = run(make_interp(5), |ip| {
+            // 初始栈: 0 1 2
+            let _ = ip.stack.push(U256::from(0));
+            let _ = ip.stack.push(U256::from(1));
+            let _ = ip.stack.push(U256::from(2));
+            swap2_pop(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        let (interp2, pc2) = run(make_interp(5), |ip| {
+            let _ = ip.stack.push(U256::from(0));
+            let _ = ip.stack.push(U256::from(1));
+            let _ = ip.stack.push(U256::from(2));
+            // 等效操作: SWAP2 + POP，然后手动 PC +=1
+            stack::swap::<2, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            stack::pop(InstructionContext { host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+        });
+
+        assert_eq!(pc, 1);
+        assert_eq!(pc2, 1);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_push2_jump() {
+        let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
+            // 栈: [dest, keep, discard, extra...]
+            push2_jump(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, pc2) = run(make_interp_with_jump(10, 1), |ip| {
+            stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            control::jump(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 函数将 absolute_jump(dest-1) ⇒ 6
+        assert_eq!(pc, 1);
+        assert_eq!(pc2, 1);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_push2_jumpi() {
+        let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
+            // 栈: [dest, keep, discard, extra...]
+            let _ = ip.stack.push(U256::from(5));
+            push2_jumpi(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, pc2) = run(make_interp_with_jump(10, 1), |ip| {
+            let _ = ip.stack.push(U256::from(5));
+            stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            control::jumpi(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 函数将 absolute_jump(dest-1) ⇒ 6
+        assert_eq!(pc, 1);
+        assert_eq!(pc2, 1);
+        assert_eq!(interp.stack, interp2.stack);
+
+        let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
+            // 栈: [dest, keep, discard, extra...]
+            let _ = ip.stack.push(U256::from(0));
+            push2_jumpi(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (interp2, pc2) = run(make_interp_with_jump(10, 1), |ip| {
+            let _ = ip.stack.push(U256::from(0));
+            println!("{:?}", ip.bytecode.pc());
+            stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            control::jumpi(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 函数将 absolute_jump(dest-1) ⇒ 6
+        assert_eq!(pc, 3);
+        assert_eq!(pc2, 3);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
     fn test_push1_add() {
         let (mut interp, pc) = run(make_interp(4), |ip| {
             // 栈顶 b=1
@@ -758,10 +866,362 @@ mod fused_tests {
     fn test_dup2_lt() {
         let (mut interp, pc) = run(make_interp(2), |ip| {
             let _ = ip.stack.push(U256::from(3));
-            let _ = ip.stack.push(U256::from(4)); // top
+            let _ = ip.stack.push(U256::from(4));
             dup2_lt(InstructionContext{ host: &mut (), interpreter: ip });
         });
         assert_eq!(interp.stack.top().unwrap(), &U256::ONE); // 4 < 3 false, but after swap → comparison 3<4 ⇒ true
         assert_eq!(pc, 1);
     }
+
+    #[test]
+    fn test_push1_shl() {
+        let (mut interp, pc) = run(make_interp_with_jump(3, 0), |ip| {
+            ip.bytecode.relative_jump(1);
+            let _ = ip.stack.push(U256::from(4));
+            push1_shl(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(8));
+        assert_eq!(pc, 3);
+    }
+
+    #[test]
+    fn test_push1_dup1() {
+        let (mut interp, pc) = run(make_interp_with_jump(3, 0), |ip| {
+            ip.bytecode.relative_jump(1);
+            push1_dup1(InstructionContext{ host: &mut (), interpreter: ip });
+            // stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            // ip.bytecode.relative_jump(1);
+            // stack::dup::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(1));
+        assert_eq!(pc, 3);
+    }
+
+    #[test]
+    fn test_swap1_pop() {
+        let (mut interp, pc) = run(make_interp_with_jump(3, 0), |ip| {
+            ip.bytecode.relative_jump(1);
+            let _ = ip.stack.push(U256::from(3));
+            let _ = ip.stack.push(U256::from(4));
+            swap1_pop(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(4));
+        assert_eq!(pc, 2);
+    }
+
+    #[test]
+    fn test_pop_jump() {
+        let (mut interp, pc) = run(make_interp_with_jump(10, 3), |ip| {
+            ip.bytecode.relative_jump(1);
+            let _ = ip.stack.push(U256::from(2));
+            let _ = ip.stack.push(U256::from(3));
+            let _ = ip.stack.push(U256::from(4));
+            pop_jump(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(2));
+        assert_eq!(pc, 3);
+    }
+
+    #[test]
+    fn test_jump_if_zero() {
+        // 情形 1: 条件为 0，应当跳转到 dest=0
+        let (interp_true, pc_true) = run(make_interp_with_jump(260, 258), |ip| {
+            // 当前 pc 位于 fused 指令，后面放置 [NOP, dest_hi, dest_lo, NOP]
+            
+            let _ = ip.stack.push(U256::ZERO);
+            jump_if_zero(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(pc_true, 258);
+
+        // 情形 2: 条件非 0，应当 pc +=4
+        let (_interp_false, pc_false) = run(make_interp_with_jump(10, 0), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_legacy(Bytes::from(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0])));
+            let _ = ip.stack.push(U256::ONE);
+            jump_if_zero(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        assert_eq!(pc_false, 4);
+    }
+
+    #[test]
+    fn test_push1_push1() {
+        let (mut interp, pc) = run(make_interp(5), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0x05, 0x00, 0x07, 0, 0].into()));
+            push1_push1(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let mut stack_vals = interp.stack.data().clone();
+        assert_eq!(stack_vals.pop(), Some(U256::from(7u8)));
+        assert_eq!(stack_vals.pop(), Some(U256::from(5u8)));
+        assert_eq!(pc, 3);
+    }
+
+    #[test]
+    fn test_iszero_push2() {
+        let (mut interp, pc) = run(make_interp(5), |ip| {
+            // bytecode: NOP, imm_hi, imm_lo, ...
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0x12, 0x34, 0, 0].into()));
+            let _ = ip.stack.push(U256::ZERO);
+            iszero_push2(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 栈顶应为 imm16 = 0x1234，其下为 1
+        let top = interp.stack.top().unwrap();
+        assert_eq!(*top, U256::from(0x1234u16));
+        let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
+        assert_eq!(*second, U256::ONE);
+        assert_eq!(pc, 3);
+    }
+
+    #[test]
+    fn test_push1_push1_push1_shl_sub() {
+        let (mut interp, pc) = run(make_interp(10), |ip| {
+            // immediates: imm1=2, imm2=3, imm3=1 => (3<<1)-2 = 4
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![2, 0, 3, 0, 1, 0, 0, 0, 0, 0].into()));
+            push1_push1_push1_shl_sub(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (mut interp2, pc2) = run(make_interp(10), |ip| {
+            // immediates: imm1=2, imm2=3, imm3=1 => (3<<1)-2 = 4
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![2, 0, 3, 0, 1, 0, 0, 0, 0, 0].into()));
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::shl(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            arithmetic::sub(InstructionContext{ host: &mut (), interpreter: ip });
+            // println!("{:?}", ip.stack);
+            // ip.bytecode.relative_jump(4);
+        });
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(4u8));
+        assert_eq!(pc, 7);
+        assert_eq!(interp2.stack.top().unwrap(), &U256::from(4u8));
+        assert_eq!(pc, 7);
+    }
+
+    #[test]
+    fn test_and_dup2_add_swap1_dup2_lt() {
+        // 初始化栈: c=3, b=2, a=1 (top)
+        let (mut interp, pc) = run(make_interp(10), |ip| {
+            let _ = ip.stack.push(U256::from(3)); // c (bottom of 3 values)
+            let _ = ip.stack.push(U256::from(2)); // b
+            let _ = ip.stack.push(U256::from(1)); // a (top)
+            and_dup2_add_swap1_dup2_lt(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (mut interp2, pc2) = run(make_interp(10), |ip| {
+            let _ = ip.stack.push(U256::from(3)); // c (bottom of 3 values)
+            let _ = ip.stack.push(U256::from(2)); // b
+            let _ = ip.stack.push(U256::from(1)); // a (top)
+            arithmetic::add(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            arithmetic::add(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::lt(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // 执行逻辑后: top=b=0, next=c=6
+        let top = interp.stack.top().unwrap();
+        assert_eq!(*top, U256::ZERO);
+        let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
+        assert_eq!(*second, U256::from(6u8));
+        assert_eq!(pc, 5);
+        assert_eq!(pc2, 5);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_dup2_mstore_push1_add() {
+        // initial stack: offset(0x20), val(0x0a)
+        let (mut interp, pc) = run(make_interp(10), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0, 7, 0, 0, 0, 0, 0, 0, 0].into()));
+            let _ = ip.stack.push(U256::from(0x20u64));
+            let _ = ip.stack.push(U256::from(0x0au8));
+            dup2_mstore_push1_add(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (mut interp2, pc2) = run(make_interp(10), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0, 7, 0, 0, 0, 0, 0, 0, 0].into()));
+            let _ = ip.stack.push(U256::from(0x20u64));
+            let _ = ip.stack.push(U256::from(0x0au8));
+            stack::dup::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            memory::mstore(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            arithmetic::add(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // offset should be 0x20+7=0x27 at top
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(0x27u64));
+        assert_eq!(pc, pc2);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_dup1_push4_eq_push2() {
+        // const value 0x01020304, dest=0x0003
+        let bytes = vec![0, 0x01,0x02,0x03,0x04, 0, 0x00, 0x03, 0];
+        let (mut interp, pc) = run(make_interp(10), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            let _ = ip.stack.push(U256::from_be_slice(&[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0x01,0x02,0x03,0x04]));
+            dup1_push4_eq_push2(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (mut interp2, pc2) = run(make_interp(10), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            let _ = ip.stack.push(U256::from_be_slice(&[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0x01,0x02,0x03,0x04]));
+            stack::dup::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<4, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::eq(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // top dest
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(768u16));
+        // eq result should be ONE
+        let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
+        assert_eq!(*second, U256::ONE);
+        assert_eq!(pc, pc2);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+ 
+    #[test]
+    fn test_swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt() {
+        let imm: u8 = 1; // simple
+        // prepare dummy bytecode length 13 (pattern length) with imm at index 1
+        let mut bytes = vec![0u8; 13];
+        bytes[1] = imm;
+        let (mut interp, pc) = run(make_interp(20), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            // initial stack top a=1, b=2 (note reversed order top-first)
+            let _ = ip.stack.push(U256::from(2)); // b (top)
+            let _ = ip.stack.push(U256::from(1)); // a (second)
+            swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        let (mut interp2, pc2) = run(make_interp(20), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            // initial stack top a=1, b=2 (note reversed order top-first)
+            let _ = ip.stack.push(U256::from(2)); // b (top)
+            let _ = ip.stack.push(U256::from(1)); // a (second)
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::not(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            arithmetic::add(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::bitand(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            arithmetic::add(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::lt(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+        // After execution: top (b) = a+b+imm+!imm =1+2+0+255=258
+        // second (a) = 0 (since b >= a)
+        // let top = interp.stack.top().unwrap();
+        // assert_eq!(*top, U256::from(258u64));
+        // let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
+        // assert_eq!(*second, U256::ZERO);
+        assert_eq!(pc, pc2);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_push1_calldataload_push1_shr_dup1_push4_gt_push2() {
+        // Setup immediate values: offset=0, shift=0, const=0x00000002 (> x), dest=0x0004
+        let mut bytes = vec![0u8; 16];
+        bytes[0] = 0; // offset
+        bytes[3] = 0; // shift
+        bytes[7] = 0; bytes[8] = 0; bytes[9]=0; bytes[10]=2; // const
+        bytes[13]=0; bytes[14]=4; // dest =4
+
+        let (mut interp, pc) = run(make_interp(20), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            // Provide calldata: 32 bytes zero so x=0
+            ip.input.input = CallInput::Bytes(Bytes::from(vec![0u8;32]));
+            push1_calldataload_push1_shr_dup1_push4_gt_push2(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+
+        let (mut interp2, pc2) = run(make_interp(20), |ip| {
+            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
+            // Provide calldata: 32 bytes zero so x=0
+            ip.input.input = CallInput::Bytes(Bytes::from(vec![0u8;32]));
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            system::calldataload(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::shr(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::dup::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<4, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            bitwise::gt(InstructionContext{ host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
+        });
+
+        // Stack top dest (0x0004)
+        let top = interp.stack.top().unwrap();
+        assert_eq!(*top, U256::from(4u16));
+        // second should be ONE (const > x)
+        let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
+        assert_eq!(*second, U256::ONE);
+        assert_eq!(pc, 15);
+        assert_eq!(pc, pc2);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_swap2_swap1() {
+        let (mut interp, pc) = run(make_interp(5), |ip| {
+            // bottom 0,1,2 top
+            let _ = ip.stack.push(U256::from(0));
+            let _ = ip.stack.push(U256::from(1));
+            let _ = ip.stack.push(U256::from(2));
+            swap2_swap1(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        let (mut interp2, pc2) = run(make_interp(5), |ip| {
+            let _ = ip.stack.push(U256::from(0));
+            let _ = ip.stack.push(U256::from(1));
+            let _ = ip.stack.push(U256::from(2));
+            stack::swap::<2, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            ip.bytecode.relative_jump(1);
+            stack::swap::<1, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        assert_eq!(pc, pc2);
+        assert_eq!(pc, 1);
+        assert_eq!(interp.stack, interp2.stack);
+    }
+
+    #[test]
+    fn test_snop() {
+        let (mut interp, pc) = run(make_interp(1), |ip| {
+            let _ = ip.stack.push(U256::from(123));
+            snop(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        assert_eq!(pc, 0); // snop 不移动 pc
+        assert_eq!(interp.stack.top().unwrap(), &U256::from(123u64));
+    }
+ 
 }
