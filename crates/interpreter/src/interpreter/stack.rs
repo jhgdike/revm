@@ -96,10 +96,15 @@ impl StackTr for Stack {
         self.push_slice_(slice)
     }
 
+    #[inline]
     fn backn<const N: usize>(&mut self) -> Option<[&mut U256; N]> {
         unsafe {
             self.backn()
         }
+    }
+
+    fn data(&self) -> &Vec<U256> {
+        self.data()
     }
 }
 

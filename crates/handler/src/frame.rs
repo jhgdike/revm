@@ -1,6 +1,6 @@
 use crate::evm::FrameTr;
 use crate::item_or_result::FrameInitOrResult;
-use crate::opcode_async::{get_optimized_code, send_optimized_code};
+use crate::opcode_async::gen_or_rewrite_optimized_code;
 use crate::{precompile_provider::PrecompileProvider, ItemOrResult};
 use crate::{CallFrame, CreateFrame, FrameData, FrameResult};
 use context::result::FromStringError;
@@ -227,29 +227,15 @@ impl EthFrame<EthInterpreter> {
             .load_account_code(inputs.bytecode_address)?;
 
         let mut code_hash = account.info.code_hash();
-        let mut bytecode: Bytecode;
-        let mut cache_hit = false;
-        if let Some(fused_code) = get_optimized_code(&code_hash) {
-            bytecode = fused_code;
-            cache_hit = true;
-        } else {
-            bytecode = account.info.code.clone().unwrap_or_default();
-        }
-        // let mut bytecode = account.info.code.clone().unwrap_or_default();
+        let mut bytecode = account.info.code.clone().unwrap_or_default();
 
         if let Bytecode::Eip7702(eip7702_bytecode) = bytecode {
             let account = &ctx
                 .journal_mut()
                 .load_account_code(eip7702_bytecode.delegated_address)?
                 .info;
-            // bytecode = account.code.clone().unwrap_or_default();
             code_hash = account.code_hash();
-            if let Some(fused_code) = get_optimized_code(&code_hash) {
-                bytecode = fused_code;
-                cache_hit = true;
-            } else {
-                bytecode = account.code.clone().unwrap_or_default();
-            }
+            bytecode = account.code.clone().unwrap_or_default();
         }
 
         // Returns success if bytecode is empty.
@@ -257,11 +243,12 @@ impl EthFrame<EthInterpreter> {
             ctx.journal_mut().checkpoint_commit();
             return return_result(InstructionResult::Stop);
         }
-        if !cache_hit {
-            // print!("{}", cache_hit);
-            send_optimized_code(&code_hash, bytecode.bytes_slice());
+
+        let mut cache_hit = false;
+        let mut si_bytecode = bytecode.clone();
+        if ctx.enable_superinstruction() {
+            (si_bytecode, cache_hit) = gen_or_rewrite_optimized_code(&code_hash, si_bytecode);
         }
-        // let (bytecode, cache_hit) = gen_or_rewrite_optimized_code(&code_hash, bytecode);
 
         // Create interpreter and executes call and push new CallStackFrame.
         this.get(EthFrame::invalid).clear(
@@ -271,7 +258,7 @@ impl EthFrame<EthInterpreter> {
             FrameInput::Call(inputs),
             depth,
             memory,
-            ExtBytecode::new_with_hash(bytecode, code_hash),
+            ExtBytecode::new_si_with_hash(si_bytecode, bytecode, code_hash),
             interpreter_input,
             is_static,
             ctx.cfg().spec().into(),
@@ -364,7 +351,6 @@ impl EthFrame<EthInterpreter> {
             Bytecode::new_legacy(inputs.init_code.clone()),
             init_code_hash,
         );
-        send_optimized_code(&init_code_hash, bytecode.bytes_slice());
 
         let interpreter_input = InputsImpl {
             target_address: created_address,

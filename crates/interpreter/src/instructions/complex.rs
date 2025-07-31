@@ -483,33 +483,25 @@ pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
 
     // Read shift immediate (byte 4 in slice: index 3 is PUSH1 opcode (NOP), index 4 is imm)
     let shift_byte = bytes[3] as usize;
-    let mut x = U256::ZERO;
+    let mut x = word.into();
     // 立即数来自字节，天然 <256，可直接右移
-    if hi31_is_zero(&word) {
-        x = U256::from(word.0[31]) >> shift_byte;
-    }
-
-    // Push x
-    push!(context.interpreter, x);
-    push!(context.interpreter, x);
-    // DUP1
-    // if !context.interpreter.stack.dup(1) {
-    //     context.interpreter.halt(InstructionResult::StackOverflow);
-    //     return;
-    // }
+    x = x >> shift_byte;
 
     // Constant 4-byte big-endian located starting at index 8..12
     let const_val = U256::from_be_slice(&bytes[7..11]);
+    // println!("{:?}", const_val);
 
-    // push!(context.interpreter, const_val);
-    backn!([p_ref], context.interpreter);
+    // // Push x
+    push!(context.interpreter, x);
+    // push!(context.interpreter, x);
+    
 
     // GT: compare const_val (a) and copy of x (p)
     // popn_top!([_a], p_ref, context.interpreter);
-    if const_val > *p_ref {
-        *p_ref = U256::ONE;
+    if const_val > x {
+        push!(context.interpreter, U256::ONE);
     } else {
-        *p_ref = U256::ZERO;
+        push!(context.interpreter, U256::ZERO);
     }
 
     // PUSH2 dest (index 14,15)
@@ -566,13 +558,13 @@ pub(super)fn swap1_push1_dup1_not_swap2_add_and_dup2_add_swap1_dup2_lt<
     // 2. PUSH1 immediate (byte index 2)
     context.interpreter.bytecode.relative_jump(1);
     let imm = context.interpreter.bytecode.read_u8();
-    println!("{:?}", imm);
+    // println!("{:?}", imm);
     // push!(context.interpreter, U256::from(imm));
     // b, a, im, ~im
     // a, ~im & im+b, a
     let imm = U256::from(imm);
     let tmp = (!imm & (imm+*b)) + *a;
-    println!("{:?}", tmp);
+    // println!("{:?}", tmp);
     // *a = *b;
 
     if tmp < *b {
@@ -670,17 +662,11 @@ mod fused_tests {
             }
             let _ = ip.stack.push(U256::from(7));
             let _ = ip.stack.push(U256::from(5));
-            println!("{:?}", ip.stack);
             bitwise::bitand(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}", ip.stack);
             stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}", ip.stack);
             stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}", ip.stack);
             stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}", ip.stack);
             stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}", ip.stack);
         });
         assert_eq!(pc, 4); // 函数内 relative_jump(4)
         assert_eq!(interp.stack, interp2.stack);
@@ -721,9 +707,9 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(7)); // jump dest
             let _ = ip.stack.push(U256::from(0xaa));
             let _ = ip.stack.push(U256::from(0xbb));
-            println!("{:?}", ip.stack);
+            // println!("{:?}", ip.stack);
             swap2_swap1_pop_jump(InstructionContext{ host: &mut (), interpreter: ip });
-            println!("{:?}, {:?}", ip.stack, ip.bytecode.pc());
+            // println!("{:?}, {:?}", ip.stack, ip.bytecode.pc());
         });
         let (interp2, pc2) = run(make_interp_with_jump(10, 7), |ip| {
             // 栈: [dest, keep, discard, extra...]
@@ -827,7 +813,7 @@ mod fused_tests {
         });
         let (interp2, pc2) = run(make_interp_with_jump(10, 1), |ip| {
             let _ = ip.stack.push(U256::from(0));
-            println!("{:?}", ip.bytecode.pc());
+            // println!("{:?}", ip.bytecode.pc());
             stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             ip.bytecode.relative_jump(1);
             control::jumpi(InstructionContext{ host: &mut (), interpreter: ip });
@@ -1141,26 +1127,28 @@ mod fused_tests {
         assert_eq!(interp.stack, interp2.stack);
     }
 
+    use primitives::hex::decode;
     #[test]
     fn test_push1_calldataload_push1_shr_dup1_push4_gt_push2() {
         // Setup immediate values: offset=0, shift=0, const=0x00000002 (> x), dest=0x0004
         let mut bytes = vec![0u8; 16];
+        let input = decode("70a082310000000000000000000000001000000000000000000000000000000000000001").unwrap();
         bytes[0] = 0; // offset
-        bytes[3] = 0; // shift
-        bytes[7] = 0; bytes[8] = 0; bytes[9]=0; bytes[10]=2; // const
-        bytes[13]=0; bytes[14]=4; // dest =4
+        bytes[3] = 0xe0; // shift
+        bytes[7] = 0x89; bytes[8] = 0x3d; bytes[9]=0x20; bytes[10]=0xe8; // const
+        bytes[13]=0; bytes[14]=0xad; // dest =4
 
         let (mut interp, pc) = run(make_interp(20), |ip| {
             ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
             // Provide calldata: 32 bytes zero so x=0
-            ip.input.input = CallInput::Bytes(Bytes::from(vec![0u8;32]));
+            ip.input.input = CallInput::Bytes(Bytes::from(input.clone()));
             push1_calldataload_push1_shr_dup1_push4_gt_push2(InstructionContext{ host: &mut (), interpreter: ip });
         });
 
         let (mut interp2, pc2) = run(make_interp(20), |ip| {
             ip.bytecode = ExtBytecode::new(Bytecode::new_raw(bytes.clone().into()));
             // Provide calldata: 32 bytes zero so x=0
-            ip.input.input = CallInput::Bytes(Bytes::from(vec![0u8;32]));
+            ip.input.input = CallInput::Bytes(Bytes::from(input));
             stack::push::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             ip.bytecode.relative_jump(1);
             system::calldataload(InstructionContext{ host: &mut (), interpreter: ip });
@@ -1180,7 +1168,7 @@ mod fused_tests {
 
         // Stack top dest (0x0004)
         let top = interp.stack.top().unwrap();
-        assert_eq!(*top, U256::from(4u16));
+        assert_eq!(*top, U256::from(173u16));
         // second should be ONE (const > x)
         let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
         assert_eq!(*second, U256::ONE);

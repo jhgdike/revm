@@ -150,6 +150,7 @@ pub trait MemoryTr {
 
 /// Functions needed for Interpreter Stack operations.
 pub trait StackTr {
+    fn data(&self) -> &Vec<U256>;
     /// Returns stack length.
     fn len(&self) -> usize;
 

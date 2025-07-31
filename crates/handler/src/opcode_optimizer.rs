@@ -22,7 +22,7 @@ pub(crate) enum FusionError {
 /// 2. 若发现字节码中已包含任何优化 opcode（0xB0~0xC8），直接返回 `FusionError::FailPreprocessing`；
 /// 3. 若在遍历过程中遇到 `INVALID`(0xFE) 则提早终止并返回当前结果。
 pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
-    return Ok(code.to_vec());
+    // return Ok(code.to_vec());
     let mut fused = code.to_vec();
     let mut i = 0usize;
     while i < fused.len() {
