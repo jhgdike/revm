@@ -519,12 +519,12 @@ fn is_block_terminator(op: u8) -> bool {
 /// * 如发现任何块中已出现优化 opcode（0xB0–0xC8），立即返回同样错误；
 /// * 否则仅对选定类型的基本块执行融合，其余保持原状。
 pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
-    for byte in code {
-        if *byte >= MIN_OPTIMIZED_OPCODE && *byte < MAX_OPTIMIZED_OPCODE {
-            print!("{:?}", byte);
-            return Err(FusionError::FailPreprocessing);
-        }
-    }
+    // for byte in code {
+    //     if *byte >= MIN_OPTIMIZED_OPCODE && *byte < MAX_OPTIMIZED_OPCODE {
+    //         print!("{:?}", byte);
+    //         return Err(FusionError::FailPreprocessing);
+    //     }
+    // }
     // if (MIN_OPTIMIZED_OPCODE..=MAX_OPTIMIZED_OPCODE).contains(&byte) {
     //     return Err(FusionError::FailPreprocessing);
     // }
@@ -545,7 +545,7 @@ pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, Fusio
             continue;
         }
 
-        print!("{:?} - {:?}\n", block.start_pc, block.end_pc);
+        // print!("{:?} - {:?}\n", block.start_pc, block.end_pc);
         // ---------- 预扫描：检测优化 opcode ----------
         let mut pc = block.start_pc;
         while pc < block.end_pc && pc < code.len() {
@@ -674,10 +674,10 @@ mod test {
             Err(e) => panic!("{:?}", e),
         }
 
-        // match do_basic_block_opcode_fusion(code.as_ref()) {
-        //     Ok(bytecode) => println!("{:?}", bytecode),
-        //     Err(e) => panic!("{:?}", e),
-        // }
+        match do_code_fusion(code.as_ref()) {
+            Ok(bytecode) => println!("{:?}", bytecode.encode_hex()),
+            Err(e) => panic!("{:?}", e),
+        }
     }
 
     fn load_bytecode(path: &str) -> Bytes {

@@ -1,8 +1,7 @@
 use crate::opcode_cache::OpCodeCache;
-use crate::opcode_optimizer::do_code_fusion;
+use crate::opcode_optimizer::do_basic_block_opcode_fusion;
 use bytecode::Bytecode;
 use once_cell::sync::Lazy;
-use primitives::hex::ToHexExt;
 use primitives::{B256, Bytes};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
@@ -26,7 +25,7 @@ static CODE_FUSION_TX: Lazy<Sender<(OptimizeTaskType, B256, Bytes)>> = Lazy::new
                         if let Some(_) = OpCodeCache::get(&hash) {
                             continue;
                         }
-                        match do_code_fusion(&code) {
+                        match do_basic_block_opcode_fusion(&code) {
                             Ok(fused_vec) => {
                                 let fused = Bytecode::new_raw(Bytes::from(fused_vec));
                                 // println!("{:?}", fused.bytecode().encode_hex());
@@ -56,11 +55,3 @@ pub(crate) fn gen_or_rewrite_optimized_code(hash: &B256, code: Bytecode) -> (Byt
         (code, false)
     }
 }
-
-// pub(crate) fn get_optimized_code(hash: &B256) -> Option<Bytecode> {
-//     OpCodeCache::get(hash)
-// }
-
-// pub(crate) fn send_optimized_code(hash: &B256, code: Bytes) {
-//     let _ = CODE_FUSION_TX.send((OptimizeTaskType::Generate, hash.clone(), code));
-// }
