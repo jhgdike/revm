@@ -119,6 +119,37 @@ macro_rules! popn {
     };
 }
 
+/// Count the number of identifiers
+#[macro_export]
+macro_rules! count {
+    () => (0);
+    ($x:ident) => (1);
+    ($x:ident, $($rest:ident),*) => (1 + count!($($rest),*));
+}
+
+/// 使用backn取n个数，如backn([a, b, c, d]), 分别对应interpreter.stack.back(4), back(3), back(2), back(1)
+/// back(1) 相当于是top(0)
+#[macro_export]
+macro_rules! backn {
+    ([$($x:ident),*], $interpreter:expr $(,$ret:item)?) => {
+        let Some([$( $x ),*]) = $interpreter.stack.backn::<{ count!($($x),*) }>() else {
+            $interpreter.halt($crate::InstructionResult::StackUnderflow);
+            return $($ret)?;
+        };
+    }
+}
+
+// /// Pops n values from the stack and returns the top value. Fails the instruction if n values can't be popped.
+// #[macro_export]
+// macro_rules! popn_top {
+//     ([ $($x:ident),* ], $top:ident, $interpreter:expr $(,$ret:expr)? ) => {
+//         let Some(([$( $x ),*], $top)) = $interpreter.stack.popn_top() else {
+//             $interpreter.halt($crate::InstructionResult::StackUnderflow);
+//             return $($ret)?;
+//         };
+//     };
+// }
+
 #[doc(hidden)]
 #[macro_export]
 #[collapse_debuginfo(yes)]
