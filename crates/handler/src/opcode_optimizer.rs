@@ -6,7 +6,7 @@ use bytecode::opcode as op;
 /// 自定义优化 opcode 的最小与最大取值范围。
 pub(crate) const MIN_OPTIMIZED_OPCODE: u8 = 0xB0;
 /// superinstruction max opcode
-pub(crate) const MAX_OPTIMIZED_OPCODE: u8 = 0xCF;
+pub(crate) const MAX_OPTIMIZED_OPCODE: u8 = 0xD0;
 
 /// FailPreprocessing Fusion err
 #[derive(Debug, Error)]
@@ -341,6 +341,98 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
+        // New fused patterns from Go example
+        // ----------------------------
+        
+        // DUP3 AND (2 bytes)
+        if cur + 1 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::DUP3 && c(1) == op::AND {
+                fused[cur] = op::DUP3AND;
+                fused[cur + 1] = op::SNOP;
+                i += 2;
+                continue;
+            }
+        }
+
+        // SWAP2 SWAP1 DUP3 SUB SWAP2 DUP3 GT PUSH2 (9 bytes + 2 immediate bytes)
+        if cur + 10 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::SWAP2 && c(1) == op::SWAP1 && c(2) == op::DUP3 && c(3) == op::SUB 
+                && c(4) == op::SWAP2 && c(5) == op::DUP3 && c(6) == op::GT && c(7) == op::PUSH2 {
+                fused[cur] = op::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2;
+                for off in [1, 2, 3, 4, 5, 6, 7] {
+                    fused[cur + off] = op::SNOP;
+                }
+                i += 11; // 7 opcodes + 2 immediate bytes + skip increment
+                continue;
+            }
+        }
+
+        // SWAP1 DUP2 (2 bytes)
+        if cur + 1 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::SWAP1 && c(1) == op::DUP2 {
+                fused[cur] = op::SWAP1DUP2;
+                fused[cur + 1] = op::SNOP;
+                i += 2;
+                continue;
+            }
+        }
+
+        // SHR SHR DUP1 MUL DUP1 (5 bytes)
+        if cur + 4 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::SHR && c(1) == op::SHR && c(2) == op::DUP1 && c(3) == op::MUL && c(4) == op::DUP1 {
+                fused[cur] = op::SHRSHRDUP1MULDUP1;
+                for off in [1, 2, 3, 4] {
+                    fused[cur + off] = op::SNOP;
+                }
+                i += 5;
+                continue;
+            }
+        }
+
+        // SWAP3 POP POP POP (4 bytes)
+        if cur + 3 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::SWAP3 && c(1) == op::POP && c(2) == op::POP && c(3) == op::POP {
+                fused[cur] = op::SWAP3POPPOPPOP;
+                for off in [1, 2, 3] {
+                    fused[cur + off] = op::SNOP;
+                }
+                i += 4;
+                continue;
+            }
+        }
+
+        // SUB SLT ISZERO PUSH2 (5 bytes + 2 immediate)
+        if cur + 6 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::SUB && c(1) == op::SLT && c(2) == op::ISZERO && c(3) == op::PUSH2 {
+                fused[cur] = op::SUBSLTISZEROPUSH2;
+                for off in [1, 2, 3] {
+                    fused[cur + off] = op::SNOP;
+                }
+                i += 7; // 4 opcodes + 2 immediate bytes + skip increment
+                continue;
+            }
+        }
+
+        // DUP11 MUL DUP3 SUB MUL DUP1 (6 bytes)
+        if cur + 5 < fused.len() {
+            let c = |o: usize| fused[cur + o];
+            if c(0) == op::DUP11 && c(1) == op::MUL && c(2) == op::DUP3 && c(3) == op::SUB && c(4) == op::MUL && c(5) == op::DUP1 {
+                fused[cur] = op::DUP11MULDUP3SUBMULDUP1;
+                for off in [1, 2, 3, 4, 5] {
+                    fused[cur + off] = op::SNOP;
+                }
+                i += 6;
+                continue;
+            }
+        }
+
+        // ----------------------------
         // 默认：根据 opcode 类型跳过对应的立即数字节
         // ----------------------------
         if let Some(skip) = calculate_skip_steps(&fused, cur) {
@@ -368,6 +460,9 @@ fn calculate_skip_steps(code: &[u8], cur: usize) -> Option<usize> {
         op::PUSH1PUSH1 => Some(3),                 // push1 imm1 + 1 (NOP)
         op::PUSH1ADD | op::PUSH1SHL | op::PUSH1DUP1 => Some(2),
         op::JUMPIFZERO => Some(4), // PUSH2 imm16 + NOP JUMPI replaced
+        // New fused opcodes with immediates
+        op::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => Some(3), // includes PUSH2 immediate
+        op::SUBSLTISZEROPUSH2 => Some(4), // includes PUSH2 immediate
         _ => None,
     }
 }

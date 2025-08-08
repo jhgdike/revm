@@ -596,6 +596,15 @@ opcodes! {
     0xC6 => PUSH1PUSH1PUSH1SHLSUB               => stack_io(0, 3);
     0xC7 => ANDDUP2ADDSWAP1DUP2LT      => stack_io(0, 3);
     0xC8 => SWAP1PUSH1DUP1NOTSWAP2ADDANDDUP2ADDSWAP1DUP2LT          => stack_io(1, 4);
+    
+    // New fused instructions from Go example
+    0xC9 => DUP3AND                    => stack_io(3, 2);
+    0xCA => SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => stack_io(3, 3);
+    0xCB => SWAP1DUP2                  => stack_io(2, 3);
+    0xCC => SHRSHRDUP1MULDUP1          => stack_io(3, 3);
+    0xCD => SWAP3POPPOPPOP             => stack_io(4, 1);
+    0xCE => SUBSLTISZEROPUSH2          => stack_io(3, 2);
+    0xCF => DUP11MULDUP3SUBMULDUP1     => stack_io(11, 10);
 
     0xF0 => CREATE       => stack_io(3, 1);
     0xF1 => CALL         => stack_io(7, 1);
