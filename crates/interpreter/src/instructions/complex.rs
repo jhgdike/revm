@@ -753,38 +753,73 @@ pub(super) fn swap3_pop_pop_pop<WIRE: InterpreterTypes, H: ?Sized>(
     context.interpreter.bytecode.relative_jump(3);
 }
 
-/// Fused instruction: SUB SLT ISZERO PUSH2
-/// Performs subtraction, signed less than, is zero check, then pushes 2-byte immediate
+// /// Fused instruction: SUB SLT ISZERO PUSH2
+// /// Performs subtraction, signed less than, is zero check, then pushes 2-byte immediate
+// pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
+//     context: InstructionContext<'_, H, WIRE>,
+// ) {
+//     gas!(context.interpreter, 4*gas::VERYLOW);
+//
+//     // SUB: pop x and y, compute y.Sub(&x, &y)
+//     popn!([x, y], context.interpreter);
+//     let sub_result = x.wrapping_sub(y);
+//
+//     // SLT: compare sub_result with stack top z
+//     backn!([z], context.interpreter);
+//     *z = U256::from(i256_cmp(&sub_result, z) == Ordering::Less);
+//
+//     // ISZERO: check if z is zero and set accordingly
+//     *z = if z.is_zero() {
+//         U256::ONE
+//     } else {
+//         U256::ZERO
+//     };
+//
+//     // Skip 3 bytes for SUB SLT ISZERO
+//     context.interpreter.bytecode.relative_jump(3);
+//
+//     // PUSH2: read and push 2-byte immediate safely
+//     let imm = context.interpreter.bytecode.read_slice(2);
+//     let value = U256::from_be_slice(imm);
+//     push!(context.interpreter, value);
+//
+//     context.interpreter.bytecode.relative_jump(2);
+// }
+
 pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    gas!(context.interpreter, 4*gas::VERYLOW);
-    
-    // SUB: pop x and y, compute y.Sub(&x, &y)
+    gas!(context.interpreter, 4 * gas::VERYLOW);
+
+    // SUB: x - y (pops x first, then y, computes x - y)
     popn!([x, y], context.interpreter);
     let sub_result = x.wrapping_sub(y);
-    
-    // SLT: compare sub_result with stack top z
-    backn!([z], context.interpreter);
-    *z = U256::from(i256_cmp(&sub_result, z) == Ordering::Less);
-    
-    // ISZERO: check if z is zero and set accordingly
-    *z = if z.is_zero() {
+
+    // SLT (signed): pop z, compare sub_result < z
+    popn!([z], context.interpreter);
+    let slt_result = if i256_cmp(&sub_result, &z) == core::cmp::Ordering::Less {
         U256::ONE
     } else {
         U256::ZERO
     };
+
+    // ISZERO: check if slt_result is zero
+    let iszero_result = if slt_result.is_zero() { U256::ONE } else { U256::ZERO };
     
-    // Skip 3 bytes for SUB SLT ISZERO
+    // Push the final result
+    push!(context.interpreter, iszero_result);
+
+    // Skip SUB + SLT + ISZERO
     context.interpreter.bytecode.relative_jump(3);
-    
-    // PUSH2: read and push 2-byte immediate safely
+
+    // PUSH2 immediate
     let imm = context.interpreter.bytecode.read_slice(2);
     let value = U256::from_be_slice(imm);
     push!(context.interpreter, value);
-    
     context.interpreter.bytecode.relative_jump(2);
 }
+
+
 
 /// Fused instruction: DUP11 MUL DUP3 SUB MUL DUP1
 /// Duplicates 11th element, multiplies, duplicates 3rd, subtracts, multiplies, duplicates result
@@ -1570,51 +1605,135 @@ mod fused_tests {
         assert_eq!(interp.stack, interp2.stack);
     }
 
-    #[test]
-    fn test_sub_slt_iszero_push2() { // passing
-        let (mut interp, pc) = run(make_interp(7), |ip| {
-            // Setup bytecode with PUSH2 immediate: [0, 0, 0, 0x12, 0x34, 0, 0]
-            ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0, 0, 0x12, 0x34, 0, 0].into()));
+    // #[test]
+    // fn test_sub_slt_iszero_push2() {
+    //     let (mut interp, pc) = run(make_interp(7), |ip| {
+    //         // Setup bytecode with PUSH2 immediate: [0, 0, 0, 0x12, 0x34, 0, 0]
+    //         ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0, 0, 0x12, 0x34, 0, 0].into()));
             
-            // Setup stack: [5, 3, 2] (x=3, y=5, z=2)
-            let _ = ip.stack.push(U256::from(2u8)); // z 
-            let _ = ip.stack.push(U256::from(5u8)); // y (will be popped)
-            let _ = ip.stack.push(U256::from(3u8)); // x (will be popped)
+    //         // Setup stack: [5, 3, 2] (x=3, y=5, z=2)
+    //         let _ = ip.stack.push(U256::from(2u8)); // z 
+    //         let _ = ip.stack.push(U256::from(5u8)); // y (will be popped)
+    //         let _ = ip.stack.push(U256::from(3u8)); // x (will be popped)
+    //         sub_slt_iszero_push2(InstructionContext { host: &mut (), interpreter: ip });
+    //     });
+
+    //     // SUB: 3-5 = -2, SLT: -2 < 2 = true = 1, ISZERO: 1 == 0 = false = 0
+    //     // Then PUSH2 0x1234
+    //     assert_eq!(pc, 5); // 3 for SUB/SLT/ISZERO + 2 for PUSH2
+    //     assert_eq!(interp.stack.len(), 2);
+    //     assert_eq!(interp.stack.top().unwrap(), &U256::from(0x1234u16)); // PUSH2 value
+        
+    //     let stack_data = interp.stack.data();
+    //     assert_eq!(stack_data[stack_data.len()-2], U256::ZERO); // ISZERO result
+    // }
+
+    #[test]
+    fn test_sub_slt_iszero_push2_matches_reference() {
+        use primitives::U256;
+        // one of these two, depending on your re-exports:
+        use bytecode::{Bytecode};
+        use crate::interpreter::ExtBytecode;
+
+        // Bytecode layout so that after skipping 3 bytes, the next 2 are the PUSH2 immediate
+        // (dummy leading bytes stand in for the SUB/SLT/ISZERO opcodes in real bytecode)
+        let make_bc = || ExtBytecode::new(Bytecode::new_raw(vec![0x00, 0x00, 0x00, 0x12, 0x34].into()));
+
+        // Build identical initial stacks: bottom→top = [ z=2, y=5, x=3 ]
+        let build_stack = |ip: &mut Interpreter| {
+            let _ = ip.stack.push(U256::from(2u8)); // z
+            let _ = ip.stack.push(U256::from(5u8)); // y
+            let _ = ip.stack.push(U256::from(3u8)); // x
+        };
+
+        // Fused
+        let (interp_fused, pc_fused) = run(make_interp(7), |ip| {
+            ip.bytecode = make_bc();
+            build_stack(ip);
             sub_slt_iszero_push2(InstructionContext { host: &mut (), interpreter: ip });
         });
 
-        // SUB: 3-5 = -2, SLT: -2 < 2 = true = 1, ISZERO: 1 == 0 = false = 0
-        // Then PUSH2 0x1234
-        assert_eq!(pc, 5); // 3 for SUB/SLT/ISZERO + 2 for PUSH2
-        assert_eq!(interp.stack.len(), 2);
-        assert_eq!(interp.stack.top().unwrap(), &U256::from(0x1234u16)); // PUSH2 value
-        
-        let stack_data = interp.stack.data();
-        assert_eq!(stack_data[stack_data.len()-2], U256::ZERO); // ISZERO result
+        // Reference path: SUB; SLT; ISZERO; PUSH2
+        let (interp_ref, _pc_ref) = run(make_interp(7), |ip| {
+            ip.bytecode = make_bc();
+            build_stack(ip);
+
+            // SUB (x - y)
+            arithmetic::sub(InstructionContext { host: &mut (), interpreter: ip });
+            // SLT (signed): z < (x-y)
+            crate::instructions::bitwise::slt(InstructionContext { host: &mut (), interpreter: ip });
+            // ISZERO
+            bitwise::iszero(InstructionContext { host: &mut (), interpreter: ip });
+            
+            // Skip the 3 opcode bytes to get to the PUSH2 immediate
+            ip.bytecode.relative_jump(3);
+            // PUSH2 immediate (read 2 bytes and push)
+            let imm = ip.bytecode.read_slice(2);
+            let val = U256::from_be_slice(imm);
+            let _ = ip.stack.push(val);
+        });
+
+        // Fused must skip 3 (SUB/SLT/ISZERO) + 2 (PUSH2 immediate) = 5
+        assert_eq!(pc_fused, 5);
+
+        // Full-stack equality
+        assert_eq!(interp_fused.stack, interp_ref.stack);
+
+        // Optional explicit checks for clarity:
+        let data = interp_fused.stack.data();
+        assert_eq!(data.len(), 2);                         // net -1 effect
+        assert_eq!(data[0], U256::ZERO);                   // ISZERO(SLT(2, 3-5)) = ISZERO(1) = 0
+        assert_eq!(data[1], U256::from(0x1234u16));        // PUSH2
     }
 
+
     #[test] 
-    fn test_dup11_mul_dup3_sub_mul_dup1() { // passing
-        let (mut interp, pc) = run(make_interp(6), |ip| {
-            // Setup stack with 12 elements to test DUP11
+    fn test_dup11_mul_dup3_sub_mul_dup1_matches_reference() {
+        use primitives::U256;
+        
+        // Build identical initial stacks: [1,2,3,4,5,6,7,8,9,10,11,12] bottom to top
+        let build_stack = |ip: &mut Interpreter| {
             for i in 0..12 {
                 let _ = ip.stack.push(U256::from(i + 1)); // [1,2,3,...,12] bottom to top
             }
-            // Stack: [1,2,3,4,5,6,7,8,9,10,11,12], 11th from top is 2
+        };
+        
+        // Fused
+        let (interp_fused, pc_fused) = run(make_interp(6), |ip| {
+            build_stack(ip);
             dup11_mul_dup3_sub_mul_dup1(InstructionContext { host: &mut (), interpreter: ip });
         });
-
-        // DUP11: gets 2 (11th from top)
-        // MUL: 2 * 12 = 24, pops 12, leaves 24 conceptually  
-        // DUP3: gets element that's now 3rd from current top (should be 10)
-        // SUB: 10 - 24 = -14 (wrapping)
-        // MUL: result * current_top (11), 
-        // DUP1: duplicate result
-        assert_eq!(pc, 5);
-        assert_eq!(interp.stack.len(), 12); // 12 - 1 (popped) + 1 (duplicated) = 12
         
-        // The exact result depends on the wrapping arithmetic, but we can verify the structure
-        assert!(interp.stack.len() == 12);
+        // Reference path: DUP11; MUL; DUP3; SUB; MUL; DUP1
+        let (interp_ref, _pc_ref) = run(make_interp(6), |ip| {
+            build_stack(ip);
+            
+            // DUP11: duplicate 11th element from top
+            stack::dup::<11, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            // MUL: multiply top two elements
+            arithmetic::mul(InstructionContext { host: &mut (), interpreter: ip });
+            // DUP3: duplicate 3rd element from top
+            stack::dup::<3, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            // SUB: subtract top two elements
+            arithmetic::sub(InstructionContext { host: &mut (), interpreter: ip });
+            // MUL: multiply top two elements  
+            arithmetic::mul(InstructionContext { host: &mut (), interpreter: ip });
+            // DUP1: duplicate top element
+            stack::dup::<1, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+        });
+        
+        // Fused must skip 5 bytes (as implemented in the function)
+        assert_eq!(pc_fused, 5);
+        
+        // Full-stack equality
+        assert_eq!(interp_fused.stack, interp_ref.stack);
+        
+        // Optional explicit checks for stack structure
+        let data = interp_fused.stack.data();
+        // Net stack effect: initial 12 elements, DUP11 (+1), MUL (-1), DUP3 (+1), SUB (-1), MUL (-1), DUP1 (+1) = 12
+        
+        // Verify DUP1 worked correctly - last two elements should be identical
+        assert_eq!(data[data.len()-1], data[data.len()-2]);
     }
 
     #[test]
