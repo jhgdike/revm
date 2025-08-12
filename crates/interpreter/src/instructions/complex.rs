@@ -823,44 +823,85 @@ pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
 
 /// Fused instruction: DUP11 MUL DUP3 SUB MUL DUP1
 /// Duplicates 11th element, multiplies, duplicates 3rd, subtracts, multiplies, duplicates result
+// pub(super) fn dup11_mul_dup3_sub_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
+//     context: InstructionContext<'_, H, WIRE>,
+// ) {
+//     gas!(context.interpreter, 6*gas::VERYLOW);
+//
+//     // DUP11 MUL: get 11th element from stack, pop y, compute y.Mul(&x, &y)
+//     let stack_len = context.interpreter.stack.len();
+//     if stack_len < 11 {
+//         context.interpreter.halt(InstructionResult::StackUnderflow);
+//         return;
+//     }
+//
+//     let x = context.interpreter.stack.data()[stack_len - 11];
+//     popn!([y], context.interpreter);
+//     let mul_result = x * y;
+//
+//     // DUP3 SUB: get 3rd element from stack (now 2nd since we popped), compute x.Sub(&mul_result, &x)
+//     let stack_len = context.interpreter.stack.len();
+//     if stack_len < 2 {
+//         context.interpreter.halt(InstructionResult::StackUnderflow);
+//         return;
+//     }
+//
+//     let x = context.interpreter.stack.data()[stack_len - 2];
+//     let sub_result = x.wrapping_sub(mul_result);
+//
+//     // MUL: multiply result with stack top z
+//     backn!([z], context.interpreter);
+//     *z = sub_result * *z;
+//
+//     // DUP1: duplicate the final result
+//     if !context.interpreter.stack.dup(1) {
+//         context.interpreter.halt(InstructionResult::StackUnderflow);
+//         return;
+//     }
+//
+//     context.interpreter.bytecode.relative_jump(5);
+// }
+
+// Fused: DUP11 ; MUL ; DUP3 ; SUB ; MUL ; DUP1
 pub(super) fn dup11_mul_dup3_sub_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    gas!(context.interpreter, 6*gas::VERYLOW);
-    
-    // DUP11 MUL: get 11th element from stack, pop y, compute y.Mul(&x, &y)
-    let stack_len = context.interpreter.stack.len();
-    if stack_len < 11 {
+    // Gas: DUP11(VL) + MUL(LOW) + DUP3(VL) + SUB(VL) + MUL(LOW) + DUP1(VL)
+    gas!(context.interpreter, 4 * gas::VERYLOW + 2 * gas::LOW);
+
+    // Need at least 11 items for DUP11
+    let len = context.interpreter.stack.len();
+    if len < 11 {
         context.interpreter.halt(InstructionResult::StackUnderflow);
         return;
     }
-    
-    let x = context.interpreter.stack.data()[stack_len - 11];
-    popn!([y], context.interpreter);
-    let mul_result = x * y;
-    
-    // DUP3 SUB: get 3rd element from stack (now 2nd since we popped), compute x.Sub(&mul_result, &x)
-    let stack_len = context.interpreter.stack.len();
-    if stack_len < 2 {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-    
-    let x = context.interpreter.stack.data()[stack_len - 2];
-    let sub_result = x.wrapping_sub(mul_result);
-    
-    // MUL: multiply result with stack top z
-    backn!([z], context.interpreter);
-    *z = sub_result * *z;
-    
-    // DUP1: duplicate the final result
+
+    // Emulate: DUP11; MUL  (without pushing the DUP)
+    let x11 = context.interpreter.stack.data()[len - 11];     // value that DUP11 would copy
+    popn!([top], context.interpreter);                        // original top before MUL
+    let mul_result = x11.wrapping_mul(top);                   // product that would be on top
+
+    // Emulate: DUP3; SUB  (third-from-top after the product would be current second-from-top)
+    let len2 = context.interpreter.stack.len();
+    debug_assert!(len2 >= 2);
+    let dup3_value = context.interpreter.stack.data()[len2 - 2];
+    // SUB pops x then y and pushes y - x  => dup3_value - mul_result
+    let sub_result = dup3_value.wrapping_sub(mul_result);
+
+    // Emulate: MUL  (sub_result * current top), write in-place
+    backn!([z], context.interpreter);                         // current top (the "next" operand)
+    *z = sub_result.wrapping_mul(*z);
+
+    // Emulate: DUP1
     if !context.interpreter.stack.dup(1) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
+        context.interpreter.halt(InstructionResult::StackOverflow);
         return;
     }
-    
+
+    // Skip remaining 5 bytes of the 6-op sequence
     context.interpreter.bytecode.relative_jump(5);
 }
+
 
 
 #[cfg(test)]
@@ -1735,6 +1776,46 @@ mod fused_tests {
         // Verify DUP1 worked correctly - last two elements should be identical
         assert_eq!(data[data.len()-1], data[data.len()-2]);
     }
+
+    #[test]
+    fn test_dup11_mul_dup3_sub_mul_dup1_matches_reference2() {
+        use primitives::U256;
+
+        // Build identical initial stacks: [1..12] bottom→top
+        let build_stack = |ip: &mut Interpreter| {
+            for i in 1..=12 {
+                let _ = ip.stack.push(U256::from(i));
+            }
+        };
+
+        // Fused
+        let (interp_fused, pc_fused) = run(make_interp(6), |ip| {
+            build_stack(ip);
+            dup11_mul_dup3_sub_mul_dup1(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        // Reference: DUP11; MUL; DUP3; SUB; MUL; DUP1
+        let (interp_ref, _pc_ref) = run(make_interp(6), |ip| {
+            build_stack(ip);
+            stack::dup::<11, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            arithmetic::mul(InstructionContext { host: &mut (), interpreter: ip });
+            stack::dup::<3, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+            arithmetic::sub(InstructionContext { host: &mut (), interpreter: ip });
+            arithmetic::mul(InstructionContext { host: &mut (), interpreter: ip });
+            stack::dup::<1, _, _>(InstructionContext { host: &mut (), interpreter: ip });
+        });
+
+        // Fused must skip 5 bytes (we executed the whole 6-op bundle)
+        assert_eq!(pc_fused, 5);
+
+        // Full-stack equality
+        assert_eq!(interp_fused.stack, interp_ref.stack);
+
+        // Sanity: last two equal (DUP1)
+        let data = interp_fused.stack.data();
+        assert_eq!(data[data.len()-1], data[data.len()-2]);
+    }
+
 
     #[test]
     fn test_swap2_swap1_dup3_sub_swap2_dup3_gt_push2() { // passing
