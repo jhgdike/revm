@@ -61,7 +61,7 @@ pub fn analyze_legacy(bytecode: Bytes) -> (JumpTable, Bytes) {
 }
 
 #[warn(unused_unsafe)]
-fn code_bitmap_for_si(jumps: &mut BitVec<u8, Lsb0>, code: u8, pos: usize) -> Option<usize> {
+fn code_bitmap_for_si(_jumps: &mut BitVec<u8, Lsb0>, code: u8, _pos: usize) -> Option<usize> {
     match code {
         opcode::PUSH2JUMP | opcode::PUSH2JUMPI => {
             // set1(jumps, pos);
@@ -119,7 +119,35 @@ fn code_bitmap_for_si(jumps: &mut BitVec<u8, Lsb0>, code: u8, pos: usize) -> Opt
             Some(12)
         }
 
-        // opcode::SWAP2Sw
+        opcode::DUP3AND => {
+            Some(2)
+        }
+
+        opcode::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => {
+            // set2(jumps, pos+7);
+            Some(9)
+        }
+
+        opcode::SWAP1DUP2 => {
+            Some(2)
+        }
+
+        opcode::SHRSHRDUP1MULDUP1 => {
+            Some(5)
+        }
+
+        opcode::SWAP3POPPOPPOP => {
+            Some(4)
+        }
+
+        opcode::SUBSLTISZEROPUSH2 => {
+            // set2(jumps, pos+3);
+            Some(5)
+        }
+
+        opcode::DUP11MULDUP3SUBMULDUP1 => {
+            Some(5)
+        }
 
         _ => {None}
     }

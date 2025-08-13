@@ -645,6 +645,9 @@ mod tests {
         for push in PUSH1..=PUSH32 {
             expected[push as usize] = push - PUSH1 + 1;
         }
+        // Fused opcodes with immediate bytes
+        expected[PUSH2JUMP as usize] = 2;
+        expected[PUSH2JUMPI as usize] = 2;
 
         for (i, opcode) in OPCODE_INFO.iter().enumerate() {
             if let Some(opcode) = opcode {
@@ -693,7 +696,7 @@ mod tests {
         for _ in OPCODE_INFO.into_iter().flatten() {
             opcode_num += 1;
         }
-        assert_eq!(opcode_num, 175);
+        assert_eq!(opcode_num, 182);
     }
 
     #[test]
