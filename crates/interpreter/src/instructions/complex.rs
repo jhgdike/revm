@@ -755,37 +755,6 @@ pub(super) fn swap3_pop_pop_pop<WIRE: InterpreterTypes, H: ?Sized>(
 
 // /// Fused instruction: SUB SLT ISZERO PUSH2
 // /// Performs subtraction, signed less than, is zero check, then pushes 2-byte immediate
-// pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
-//     context: InstructionContext<'_, H, WIRE>,
-// ) {
-//     gas!(context.interpreter, 4*gas::VERYLOW);
-//
-//     // SUB: pop x and y, compute y.Sub(&x, &y)
-//     popn!([x, y], context.interpreter);
-//     let sub_result = x.wrapping_sub(y);
-//
-//     // SLT: compare sub_result with stack top z
-//     backn!([z], context.interpreter);
-//     *z = U256::from(i256_cmp(&sub_result, z) == Ordering::Less);
-//
-//     // ISZERO: check if z is zero and set accordingly
-//     *z = if z.is_zero() {
-//         U256::ONE
-//     } else {
-//         U256::ZERO
-//     };
-//
-//     // Skip 3 bytes for SUB SLT ISZERO
-//     context.interpreter.bytecode.relative_jump(3);
-//
-//     // PUSH2: read and push 2-byte immediate safely
-//     let imm = context.interpreter.bytecode.read_slice(2);
-//     let value = U256::from_be_slice(imm);
-//     push!(context.interpreter, value);
-//
-//     context.interpreter.bytecode.relative_jump(2);
-// }
-
 pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
@@ -823,45 +792,6 @@ pub(super) fn sub_slt_iszero_push2<WIRE: InterpreterTypes, H: ?Sized>(
 
 /// Fused instruction: DUP11 MUL DUP3 SUB MUL DUP1
 /// Duplicates 11th element, multiplies, duplicates 3rd, subtracts, multiplies, duplicates result
-// pub(super) fn dup11_mul_dup3_sub_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
-//     context: InstructionContext<'_, H, WIRE>,
-// ) {
-//     gas!(context.interpreter, 6*gas::VERYLOW);
-//
-//     // DUP11 MUL: get 11th element from stack, pop y, compute y.Mul(&x, &y)
-//     let stack_len = context.interpreter.stack.len();
-//     if stack_len < 11 {
-//         context.interpreter.halt(InstructionResult::StackUnderflow);
-//         return;
-//     }
-//
-//     let x = context.interpreter.stack.data()[stack_len - 11];
-//     popn!([y], context.interpreter);
-//     let mul_result = x * y;
-//
-//     // DUP3 SUB: get 3rd element from stack (now 2nd since we popped), compute x.Sub(&mul_result, &x)
-//     let stack_len = context.interpreter.stack.len();
-//     if stack_len < 2 {
-//         context.interpreter.halt(InstructionResult::StackUnderflow);
-//         return;
-//     }
-//
-//     let x = context.interpreter.stack.data()[stack_len - 2];
-//     let sub_result = x.wrapping_sub(mul_result);
-//
-//     // MUL: multiply result with stack top z
-//     backn!([z], context.interpreter);
-//     *z = sub_result * *z;
-//
-//     // DUP1: duplicate the final result
-//     if !context.interpreter.stack.dup(1) {
-//         context.interpreter.halt(InstructionResult::StackUnderflow);
-//         return;
-//     }
-//
-//     context.interpreter.bytecode.relative_jump(5);
-// }
-
 // Fused: DUP11 ; MUL ; DUP3 ; SUB ; MUL ; DUP1
 pub(super) fn dup11_mul_dup3_sub_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
@@ -1645,29 +1575,6 @@ mod fused_tests {
         assert_eq!(interp.stack.len(), interp2.stack.len());
         assert_eq!(interp.stack, interp2.stack);
     }
-
-    // #[test]
-    // fn test_sub_slt_iszero_push2() {
-    //     let (mut interp, pc) = run(make_interp(7), |ip| {
-    //         // Setup bytecode with PUSH2 immediate: [0, 0, 0, 0x12, 0x34, 0, 0]
-    //         ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![0, 0, 0, 0x12, 0x34, 0, 0].into()));
-            
-    //         // Setup stack: [5, 3, 2] (x=3, y=5, z=2)
-    //         let _ = ip.stack.push(U256::from(2u8)); // z 
-    //         let _ = ip.stack.push(U256::from(5u8)); // y (will be popped)
-    //         let _ = ip.stack.push(U256::from(3u8)); // x (will be popped)
-    //         sub_slt_iszero_push2(InstructionContext { host: &mut (), interpreter: ip });
-    //     });
-
-    //     // SUB: 3-5 = -2, SLT: -2 < 2 = true = 1, ISZERO: 1 == 0 = false = 0
-    //     // Then PUSH2 0x1234
-    //     assert_eq!(pc, 5); // 3 for SUB/SLT/ISZERO + 2 for PUSH2
-    //     assert_eq!(interp.stack.len(), 2);
-    //     assert_eq!(interp.stack.top().unwrap(), &U256::from(0x1234u16)); // PUSH2 value
-        
-    //     let stack_data = interp.stack.data();
-    //     assert_eq!(stack_data[stack_data.len()-2], U256::ZERO); // ISZERO result
-    // }
 
     #[test]
     fn test_sub_slt_iszero_push2_matches_reference() {
