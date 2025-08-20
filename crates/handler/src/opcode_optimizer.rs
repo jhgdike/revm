@@ -3,7 +3,6 @@ use bytecode::opcode as op;
 
 /// superinstruction in revm
 
-/// 自定义优化 opcode 的最小与最大取值范围。
 pub(crate) const MIN_OPTIMIZED_OPCODE: u8 = 0xB0;
 /// superinstruction max opcode
 pub(crate) const MAX_OPTIMIZED_OPCODE: u8 = 0xCF;
@@ -16,11 +15,6 @@ pub(crate) enum FusionError {
     FailPreprocessing,
 }
 
-/// 对字节码进行模式匹配融合，生成新的字节码副本。
-///
-/// 1. `code` 本身保持不变，返回新的 `Vec<u8>`；
-/// 2. 若发现字节码中已包含任何优化 opcode（0xB0~0xC8），直接返回 `FusionError::FailPreprocessing`；
-/// 3. 若在遍历过程中遇到 `INVALID`(0xFE) 则提早终止并返回当前结果。
 pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
     // return Ok(code.to_vec());
     let mut fused = code.to_vec();
@@ -28,18 +22,16 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
     while i < fused.len() {
         let cur = i;
 
-        // 1. 提前终止：若遇到 INVALID。
         if fused[cur] == op::INVALID {
             return Ok(fused);
         }
 
-        // 2. 预处理：若已包含优化 opcode，直接报错。
         if fused[cur] <= MIN_OPTIMIZED_OPCODE && fused[cur] >= MAX_OPTIMIZED_OPCODE {
             return Err(FusionError::FailPreprocessing);
         }
 
         // ----------------------------
-        // 15-byte 融合
+        // 15-byte 
         // PUSH1 _ CALLDATALOAD PUSH1 _ SHR DUP1 PUSH4 _ _ _ _ _ GT PUSH2 _ _
         // ----------------------------
         if cur + 15 < fused.len() {
@@ -63,7 +55,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 12-byte 融合
+        // 12-byte 
         // SWAP1 PUSH1 _ DUP1 NOT SWAP2 ADD AND DUP2 ADD SWAP1 DUP2 LT
         // ----------------------------
         if cur + 12 < fused.len() {
@@ -91,7 +83,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 9-byte 融合
+        // 9-byte 
         // DUP1 PUSH4 _ _ _ _ EQ PUSH2 _ _
         // ----------------------------
         if cur + 9 < fused.len() {
@@ -107,7 +99,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 7-byte 融合
+        // 7-byte 
         // PUSH1 _ PUSH1 _ PUSH1 _ SHL SUB
         // ----------------------------
         if cur + 7 < fused.len() {
@@ -128,7 +120,7 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 6-byte 融合 (AND DUP2 ADD SWAP1 DUP2 LT)
+        // 6-byte (AND DUP2 ADD SWAP1 DUP2 LT)
         // ----------------------------
         if cur + 5 < fused.len() {
             let c = |o: usize| fused[cur + o];
@@ -149,7 +141,6 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 5-byte 融合
         // （1）AND SWAP1 POP SWAP2 SWAP1
         // （2）ISZERO PUSH2 _ _ JUMPI  ➜ JUMPIFZERO
         // （3）DUP2 MSTORE PUSH1 _ ADD ➜ DUP2MSTOREPUSH1ADD
@@ -191,7 +182,6 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 4-byte 融合
         // SWAP2 SWAP1 POP JUMP  ➜ SWAP2SWAP1POPJUMP
         // SWAP1 POP SWAP2 SWAP1 ➜ SWAP1POPSWAP2SWAP1
         // POP SWAP2 SWAP1 POP   ➜ POPSWAP2SWAP1POP
@@ -260,7 +250,6 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 3-byte 融合
         // PUSH1 _ ADD  ➜ PUSH1ADD
         // PUSH1 _ SHL  ➜ PUSH1SHL
         // PUSH1 _ DUP1 ➜ PUSH1DUP1
@@ -291,7 +280,6 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
         }
 
         // ----------------------------
-        // 2-byte 融合
         // SWAP1 POP        ➜ SWAP1POP
         // POP JUMP         ➜ POPJUMP
         // POP POP          ➜ POP2
@@ -340,9 +328,6 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
             }
         }
 
-        // ----------------------------
-        // 默认：根据 opcode 类型跳过对应的立即数字节
-        // ----------------------------
         if let Some(skip) = calculate_skip_steps(&fused, cur) {
             i += skip;
         }
@@ -352,17 +337,14 @@ pub(crate) fn do_code_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
     Ok(fused)
 }
 
-/// 计算在遍历到 `cur` 时需要额外跳过的字节数（不含当前位置）。
 fn calculate_skip_steps(code: &[u8], cur: usize) -> Option<usize> {
     let inst = code[cur];
 
-    // 1. 普通 PUSH 指令：跳过立即数长度。
     if inst >= op::PUSH1 && inst <= op::PUSH32 {
         let steps = (inst - op::PUSH1 + 1) as usize;
         return Some(steps);
     }
 
-    // 2. 针对已融合 opcode 的立即数跳过规则。
     match inst {
         op::PUSH2JUMP | op::PUSH2JUMPI => Some(3), // (push2 imm16) + 1 (NOP)
         op::PUSH1PUSH1 => Some(3),                 // push1 imm1 + 1 (NOP)
@@ -389,7 +371,6 @@ pub(crate) struct BasicBlock {
 }
 
 impl BasicBlock {
-    /// 将整段字节码切分为若干 BasicBlock
     pub(crate) fn generate(code: &[u8]) -> Box<[Self]> {
         if code.is_empty() {
             return Vec::new().into_boxed_slice();
@@ -422,7 +403,6 @@ impl BasicBlock {
         while pc < code.len() {
             let op = code[pc];
 
-            // 需要开始新块的条件：
             if op == op::INVALID || jump_dests.contains(&pc) {
                 if let Some(mut blk) = current.take() {
                     blk.end_pc = pc;
@@ -470,11 +450,10 @@ impl BasicBlock {
             if is_block_terminator(op) {
                 if let Some(mut blk) = current.take() {
                     blk.end_pc = pc;
-                    // 处理无条件跳转目标（JUMP / RJUMP / JUMPF）
                     // if (op == op::JUMP) && has_immediate {
-                    //     let imm_start = blk.opcodes.len() - (inst_len - 1); // 跳过 opcode 本身
+                    //     let imm_start = blk.opcodes.len() - (inst_len - 1);
                     //     let imm_bytes = &blk.opcodes[imm_start..];
-                    //     // 截取低 8 字节转 usize
+
                     //     let mut tgt: usize = 0;
                     //     for &b in imm_bytes.iter().rev().take(8) {
                     //         tgt = (tgt << 8) | b as usize;
@@ -496,7 +475,6 @@ impl BasicBlock {
     }
 }
 
-/// 判断给定 opcode 是否终结 BasicBlock
 fn is_block_terminator(op: u8) -> bool {
     matches!(
         op,
@@ -512,12 +490,6 @@ fn is_block_terminator(op: u8) -> bool {
 // =============================================================================
 //  CFG-based opcode fusion – translated from provided Go implementation
 // =============================================================================
-
-/// 基于基本块（CFG）分析的 opcode 融合入口。
-///
-/// * 若字节码为空或基本块产生失败，则返回 `FusionError::FailPreprocessing`；
-/// * 如发现任何块中已出现优化 opcode（0xB0–0xC8），立即返回同样错误；
-/// * 否则仅对选定类型的基本块执行融合，其余保持原状。
 pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, FusionError> {
     // for byte in code {
     //     if *byte >= MIN_OPTIMIZED_OPCODE && *byte < MAX_OPTIMIZED_OPCODE {
@@ -528,25 +500,20 @@ pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, Fusio
     // if (MIN_OPTIMIZED_OPCODE..=MAX_OPTIMIZED_OPCODE).contains(&byte) {
     //     return Err(FusionError::FailPreprocessing);
     // }
-    // 生成基本块
     let blocks = BasicBlock::generate(code);
     if blocks.is_empty() {
         return Err(FusionError::FailPreprocessing);
     }
 
-    // 拷贝原始字节码，后续修改写回此副本
     let mut fused_code = code.to_vec();
 
-    // 遍历每个基本块
     for (idx, block) in blocks.iter().enumerate() {
-        // 跳过类型为 Others 的块
         let blk_ty = get_block_type(block, &blocks, idx);
         if matches!(blk_ty, BlockType::Others) {
             continue;
         }
 
         // print!("{:?} - {:?}\n", block.start_pc, block.end_pc);
-        // ---------- 预扫描：检测优化 opcode ----------
         let mut pc = block.start_pc;
         while pc < block.end_pc && pc < code.len() {
             let byte = code[pc];
@@ -560,7 +527,6 @@ pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, Fusio
             }
         }
 
-        // ---------- 检测 INVALID ----------
         let mut pc = block.start_pc;
         let mut has_invalid = false;
         while pc < block.end_pc && pc < code.len() {
@@ -575,10 +541,9 @@ pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, Fusio
             }
         }
         if has_invalid {
-            continue; // 跳过含 INVALID 的块
+            continue;
         }
 
-        // ---------- 应用融合 ----------
         fuse_block(&mut fused_code, block)?;
     }
 
@@ -589,7 +554,6 @@ pub(crate) fn do_basic_block_opcode_fusion(code: &[u8]) -> Result<Vec<u8>, Fusio
 //  Block-level helpers
 // -----------------------------------------------------------------------------
 
-/// 区分基本块类型（与 Go 版本保持一致）
 #[derive(PartialEq, Eq)]
 enum BlockType {
     Empty,
@@ -620,7 +584,6 @@ fn get_block_type(block: &BasicBlock, blocks: &[BasicBlock], index: usize) -> Bl
     BlockType::Others
 }
 
-/// 对单个基本块执行 opcode 融合。直接在 `code` 切片上原地修改。
 fn fuse_block(code: &mut [u8], block: &BasicBlock) -> Result<(), FusionError> {
     let start = block.start_pc;
     let end = block.end_pc.min(code.len());
@@ -628,13 +591,10 @@ fn fuse_block(code: &mut [u8], block: &BasicBlock) -> Result<(), FusionError> {
         return Ok(());
     }
 
-    // 为了复用已有的 `do_code_fusion` 逻辑，我们对块切片执行一次整体融合，
-    // 之后把结果写回原字节码。
     {
         let slice = &code[start..end];
-        let fused_slice = do_code_fusion(slice)?; // 可能返回 FailPreprocessing，但前面已排除。
+        let fused_slice = do_code_fusion(slice)?;
         debug_assert_eq!(fused_slice.len(), slice.len());
-        // SAFETY: start..end 与 fused_slice 长度一致
         code[start..end].copy_from_slice(&fused_slice);
     }
     Ok(())

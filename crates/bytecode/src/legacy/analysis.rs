@@ -63,61 +63,25 @@ pub fn analyze_legacy(bytecode: Bytes) -> (JumpTable, Bytes) {
 #[warn(unused_unsafe)]
 fn code_bitmap_for_si(jumps: &mut BitVec<u8, Lsb0>, code: u8, pos: usize) -> Option<usize> {
     match code {
-        opcode::PUSH2JUMP | opcode::PUSH2JUMPI => {
-            // set1(jumps, pos);
-            return Some(3);
-        }
+        opcode::PUSH2JUMP | opcode::PUSH2JUMPI => {Some(4)}
 
-        opcode::PUSH1PUSH1 => {
-            // set1(jumps, pos); set1(jumps, pos+2); 
-            return Some(3);
-        }
+        opcode::PUSH1PUSH1 => {Some(4)}
 
-        opcode::PUSH1ADD | opcode::PUSH1SHL | opcode::PUSH1DUP1 => {
-            // set1(jumps, pos);
-            return Some(2);
-        }
+        opcode::PUSH1ADD | opcode::PUSH1SHL | opcode::PUSH1DUP1 => {Some(3)}
 
-        opcode::JUMPIFZERO => {
-            // set1(jumps, pos+1);
-            return Some(4);
-        }
+        opcode::JUMPIFZERO => {Some(5)}
 
-        opcode::ISZEROPUSH2 => {
-            // set1(jumps, pos+1);
-            return Some(3);
-        }
+        opcode::ISZEROPUSH2 => {Some(5)}
 
-        opcode::DUP2MSTOREPUSH1ADD => {
-            // set1(jumps, pos+2);
-            Some(4)
-        }
+        opcode::DUP2MSTOREPUSH1ADD => {Some(5)}
 
-        opcode::DUP1PUSH4EQPUSH2 => {
-            // set4(jumps, pos + 1);
-            // set2(jumps, pos + 7);
-            Some(9)
-        }
+        opcode::DUP1PUSH4EQPUSH2 => {Some(10)}
 
-        opcode::PUSH1CALLDATALOADPUSH1SHRDUP1PUSH4GTPUSH2 => {
-            // set1(jumps, pos);
-            // set1(jumps, pos+3);
-            // set4(jumps, pos + 7);
-            // set2(jumps, pos + 13);
-            Some(15)
-        }
+        opcode::PUSH1CALLDATALOADPUSH1SHRDUP1PUSH4GTPUSH2 => {Some(16)}
 
-        opcode::PUSH1PUSH1PUSH1SHLSUB => {
-            // set1(jumps, pos);
-            // set1(jumps, pos+2);
-            // set1(jumps, pos+4);
-            Some(7)
-        }
+        opcode::PUSH1PUSH1PUSH1SHLSUB => {Some(8)}
 
-        opcode:: SWAP1PUSH1DUP1NOTSWAP2ADDANDDUP2ADDSWAP1DUP2LT => {
-            // set1(jumps, pos+1);
-            Some(12)
-        }
+        opcode:: SWAP1PUSH1DUP1NOTSWAP2ADDANDDUP2ADDSWAP1DUP2LT => {Some(13)}
 
         // opcode::SWAP2Sw
 
