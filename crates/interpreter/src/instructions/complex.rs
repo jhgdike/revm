@@ -13,24 +13,13 @@ use crate::interpreter_action::CallInput;
 use std::time::{Duration, Instant};
 use std::hint::black_box;
 
-// ============================ 新增 Super-Instructions ============================
+// ============================ Super-Instructions ============================
 
-/// Fused instruction: AND 之后对顶部三元素做 Swap1/Pop/Swap2/Swap1 的效果。
-///
-/// 等价逻辑（以栈顶为索引 0）：
-/// 1. pop a, pop b        // 取出两个操作数
-/// 2. r = a & b           // 位与运算
-/// 3. 读取剩余栈顶 c(0), d(1), e(2)
-/// 4. 结果栈应变为 [d, e, r, ...] （将 r 放到第 2 层，其他元素上移）
-///
-/// 该函数假设在运行前栈深度 ≥ 5，否则会触发 StackUnderflow。
 pub(super)fn and_swap1_pop_swap2_swap1<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
-    // 基础 gas：沿用 AND 指令 (VERYLOW)。多出来的交换成本 EVM 原生为 0。
     gas!(context.interpreter, 4*gas::VERYLOW+gas::BASE);
 
-    // 1. pop 两个操作数
     popn!([a, b], context.interpreter);
     let r = a & b;
     backn!([c, d, e], context.interpreter);
@@ -197,7 +186,6 @@ pub(super)fn push1_shl<WIRE: InterpreterTypes, H: ?Sized>(context: InstructionCo
     let shift = context.interpreter.bytecode.read_u8();
     backn!([val], context.interpreter);
 
-    // `shift` 为 u8，范围已限定在 0..=255，无需再比较。
     *val = *val << (shift as usize);
 
     context.interpreter.bytecode.relative_jump(2);
@@ -430,21 +418,6 @@ pub(super)fn dup1_push4_eq_push2<WIRE: InterpreterTypes, H: ?Sized>(
     context.interpreter.bytecode.relative_jump(2);
 }
 
-#[inline]
-fn hi31_is_zero(word: &B256) -> bool {
-    // 把前 24 字节当成 3 × u64 读取，再取第 25~31 字节组成的 u64
-    // => 只要 OR 后结果为 0，即全部为 0
-    let p = word.as_ptr() as *const u64;
-    // SAFETY: B256 恰好 32 字节，对齐到 u8；逐 8 字节读取合法
-    unsafe {
-        let v0 = *p;               // byte  0‥7
-        let v1 = *p.add(1);        // byte  8‥15
-        let v2 = *p.add(2);        // byte 16‥23
-        let last = *p.add(3) & 0xffff_ffff_ffff_ff00u64; // 去掉最低 1 byte
-        (v0 | v1 | v2 | last) == 0
-    }
-}
-
 /// Fused instruction: PUSH1 CALLDATALOAD PUSH1 SHR DUP1 PUSH4 GT PUSH2
 pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
     WIRE: InterpreterTypes,
@@ -488,7 +461,6 @@ pub(super)fn push1_calldataload_push1_shr_dup1_push4_gt_push2<
     // Read shift immediate (byte 4 in slice: index 3 is PUSH1 opcode (NOP), index 4 is imm)
     let shift_byte = bytes[3] as usize;
     let mut x = word.into();
-    // 立即数来自字节，天然 <256，可直接右移
     x = x >> shift_byte;
 
     // Constant 4-byte big-endian located starting at index 8..12
@@ -533,7 +505,6 @@ pub(super)fn push1_push1_push1_shl_sub<WIRE: InterpreterTypes, H: ?Sized>(
     let imm2 = U256::from(bytes[2]); // second
     let imm3 = bytes[4] as usize; // third is shift amount
 
-    // Compute result: (imm2 << imm3) - imm1 (imm3 最大 255，安全)
     let mut res = imm2 << imm3;
     res = res.wrapping_sub(imm1);
 
@@ -915,16 +886,13 @@ mod fused_tests {
     use bytecode::{Bytecode, JumpTable};
     use primitives::Bytes;
 
-    type Interp = Interpreter<EthInterpreter>;   // 简写
+    type Interp = Interpreter<EthInterpreter>;
 
     // helper
     fn make_interp(len: usize) -> Interp {
         let mut i = Interp::default_ext();
-        // Set up gas for testing (enough for all operations)
-        i.gas = crate::Gas::new(1000000);
-        // 直接新建一段原始字节码并替换
         let dummy = Bytecode::new_legacy(Bytes::from(vec![0u8; len]));
-        i.bytecode = ExtBytecode::new(dummy);   // 字节是 pub，可整体赋值
+        i.bytecode = ExtBytecode::new(dummy);
         i
     }
 
@@ -938,13 +906,12 @@ mod fused_tests {
         for i in 0..len-1 {
             v[i] = i as u8;
         }
-        // 直接新建一段原始字节码并替换
+
         let dummy = Bytecode::new_analyzed(Bytes::from(v), len, JumpTable::new(jumps));
-        i.bytecode = ExtBytecode::new(dummy);   // 字段是 pub，可整体赋值
+        i.bytecode = ExtBytecode::new(dummy);
         i
     }
 
-    // run 把 ctx 以可变借用传入闭包
     fn run<F>(mut interp: Interp, f: F) -> (Interp, usize)
     where F: FnOnce(&mut Interp) {
         f(&mut interp);
@@ -955,7 +922,6 @@ mod fused_tests {
     #[test]
     fn test_and_swap1_pop_swap2_swap1() {
         let (mut interp, pc) = run(make_interp(10), |ip| {
-            // 预填 5 元素满足函数前置条件
             for n in 0..3 {
                 let _ = ip.stack.push(U256::from(n));
             }
@@ -963,8 +929,7 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(5));
             and_swap1_pop_swap2_swap1(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        let (interp2, pc2) = run(make_interp(10), |ip| {
-            // 预填 5 元素满足函数前置条件
+        let (interp2, _) = run(make_interp(10), |ip| {
             for n in 0..3 {
                 let _ = ip.stack.push(U256::from(n));
             }
@@ -976,14 +941,13 @@ mod fused_tests {
             stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        assert_eq!(pc, 4); // 函数内 relative_jump(4)
+        assert_eq!(pc, 4);
         assert_eq!(interp.stack, interp2.stack);
     }
 
     #[test]
     fn test_swap1_pop_swap2_swap1() {
         let (interp, pc) = run(make_interp(10), |ip| {
-            // 预填 5 元素满足函数前置条件
             for n in 0..3 {
                 let _ = ip.stack.push(U256::from(n));
             }
@@ -991,8 +955,7 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(5));
             swap1_pop_swap2_swap1(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        let (interp2, pc2) = run(make_interp(10), |ip| {
-            // 预填 5 元素满足函数前置条件
+        let (interp2, _) = run(make_interp(10), |ip| {
             for n in 0..3 {
                 let _ = ip.stack.push(U256::from(n));
             }
@@ -1003,15 +966,14 @@ mod fused_tests {
             stack::swap::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             stack::swap::<1, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        assert_eq!(pc, 3); // 函数内 relative_jump(4)
-        // assert_eq!(pc2, 3); // 函数内 relative_jump(4)
+        assert_eq!(pc, 3);
         assert_eq!(interp.stack, interp2.stack);
     }
 
     #[test]
     fn test_swap2_swap1_pop_jump() {
         let (interp, pc) = run(make_interp_with_jump(10, 7), |ip| {
-            // 栈: [dest, keep, discard, extra...]
+            // stack: [dest, keep, discard, extra...]
             let _ = ip.stack.push(U256::from(7)); // jump dest
             let _ = ip.stack.push(U256::from(0xaa));
             let _ = ip.stack.push(U256::from(0xbb));
@@ -1020,7 +982,7 @@ mod fused_tests {
             // println!("{:?}, {:?}", ip.stack, ip.bytecode.pc());
         });
         let (interp2, pc2) = run(make_interp_with_jump(10, 7), |ip| {
-            // 栈: [dest, keep, discard, extra...]
+            // stack: [dest, keep, discard, extra...]
             let _ = ip.stack.push(U256::from(7)); // jump dest
             let _ = ip.stack.push(U256::from(0xaa));
             let _ = ip.stack.push(U256::from(0xbb));
@@ -1029,7 +991,6 @@ mod fused_tests {
             stack::pop(InstructionContext{ host: &mut (), interpreter: ip });
             control::jump(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 函数将 absolute_jump(dest-1) ⇒ 6
         assert_eq!(pc, 7);
         assert_eq!(pc2, 7);
         assert_eq!(interp.stack, interp2.stack);
@@ -1059,7 +1020,6 @@ mod fused_tests {
     #[test]
     fn test_swap2_pop() {
         let (interp, pc) = run(make_interp(5), |ip| {
-            // 初始栈: 0 1 2
             let _ = ip.stack.push(U256::from(0));
             let _ = ip.stack.push(U256::from(1));
             let _ = ip.stack.push(U256::from(2));
@@ -1070,7 +1030,6 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(0));
             let _ = ip.stack.push(U256::from(1));
             let _ = ip.stack.push(U256::from(2));
-            // 等效操作: SWAP2 + POP，然后手动 PC +=1
             stack::swap::<2, _, _>(InstructionContext { host: &mut (), interpreter: ip });
             stack::pop(InstructionContext { host: &mut (), interpreter: ip });
             ip.bytecode.relative_jump(1);
@@ -1084,14 +1043,12 @@ mod fused_tests {
     #[test]
     fn test_push2_jump() {
         let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
-            // 栈: [dest, keep, discard, extra...]
             push2_jump(InstructionContext{ host: &mut (), interpreter: ip });
         });
         let (interp2, pc2) = run(make_interp_with_jump(10, 1), |ip| {
             stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             control::jump(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 函数将 absolute_jump(dest-1) ⇒ 6
         assert_eq!(pc, 1);
         assert_eq!(pc2, 1);
         assert_eq!(interp.stack, interp2.stack);
@@ -1100,7 +1057,6 @@ mod fused_tests {
     #[test]
     fn test_push2_jumpi() {
         let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
-            // 栈: [dest, keep, discard, extra...]
             let _ = ip.stack.push(U256::from(5));
             push2_jumpi(InstructionContext{ host: &mut (), interpreter: ip });
         });
@@ -1109,13 +1065,11 @@ mod fused_tests {
             stack::push::<2, _, _>(InstructionContext{ host: &mut (), interpreter: ip });
             control::jumpi(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 函数将 absolute_jump(dest-1) ⇒ 6
         assert_eq!(pc, 1);
         assert_eq!(pc2, 1);
         assert_eq!(interp.stack, interp2.stack);
 
         let (interp, pc) = run(make_interp_with_jump(10, 1), |ip| {
-            // 栈: [dest, keep, discard, extra...]
             let _ = ip.stack.push(U256::from(0));
             push2_jumpi(InstructionContext{ host: &mut (), interpreter: ip });
         });
@@ -1126,7 +1080,6 @@ mod fused_tests {
             ip.bytecode.relative_jump(1);
             control::jumpi(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 函数将 absolute_jump(dest-1) ⇒ 6
         assert_eq!(pc, 3);
         assert_eq!(pc2, 3);
         assert_eq!(interp.stack, interp2.stack);
@@ -1135,9 +1088,7 @@ mod fused_tests {
     #[test]
     fn test_push1_add() {
         let (mut interp, pc) = run(make_interp(4), |ip| {
-            // 栈顶 b=1
             let _ = ip.stack.push(U256::ONE);
-            // 构造 fake bytecode: [imm, NOP]
             ip.bytecode = ExtBytecode::new(Bytecode::new_raw(vec![5,0,0,0].into()));
             push1_add(InstructionContext{ host: &mut (), interpreter: ip });
         });
@@ -1218,16 +1169,12 @@ mod fused_tests {
 
     #[test]
     fn test_jump_if_zero() {
-        // 情形 1: 条件为 0，应当跳转到 dest=0
         let (interp_true, pc_true) = run(make_interp_with_jump(260, 258), |ip| {
-            // 当前 pc 位于 fused 指令，后面放置 [NOP, dest_hi, dest_lo, NOP]
-            
             let _ = ip.stack.push(U256::ZERO);
             jump_if_zero(InstructionContext{ host: &mut (), interpreter: ip });
         });
         assert_eq!(pc_true, 258);
 
-        // 情形 2: 条件非 0，应当 pc +=4
         let (_interp_false, pc_false) = run(make_interp_with_jump(10, 0), |ip| {
             ip.bytecode = ExtBytecode::new(Bytecode::new_legacy(Bytes::from(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0])));
             let _ = ip.stack.push(U256::ONE);
@@ -1256,7 +1203,6 @@ mod fused_tests {
             let _ = ip.stack.push(U256::ZERO);
             iszero_push2(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 栈顶应为 imm16 = 0x1234，其下为 1
         let top = interp.stack.top().unwrap();
         assert_eq!(*top, U256::from(0x1234u16));
         let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
@@ -1283,18 +1229,16 @@ mod fused_tests {
             bitwise::shl(InstructionContext{ host: &mut (), interpreter: ip });
             ip.bytecode.relative_jump(1);
             arithmetic::sub(InstructionContext{ host: &mut (), interpreter: ip });
-            // println!("{:?}", ip.stack);
-            // ip.bytecode.relative_jump(4);
         });
         assert_eq!(interp.stack.top().unwrap(), &U256::from(4u8));
         assert_eq!(pc, 7);
         assert_eq!(interp2.stack.top().unwrap(), &U256::from(4u8));
-        assert_eq!(pc, 7);
+        assert_eq!(pc2, 7);
+        assert_eq!(interp.stack, interp2.stack);
     }
 
     #[test]
     fn test_and_dup2_add_swap1_dup2_lt() {
-        // 初始化栈: c=3, b=2, a=1 (top)
         let (mut interp, pc) = run(make_interp(10), |ip| {
             let _ = ip.stack.push(U256::from(3)); // c (bottom of 3 values)
             let _ = ip.stack.push(U256::from(2)); // b
@@ -1317,7 +1261,6 @@ mod fused_tests {
             ip.bytecode.relative_jump(1);
             bitwise::lt(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // 执行逻辑后: top=b=0, next=c=6
         let top = interp.stack.top().unwrap();
         assert_eq!(*top, U256::ZERO);
         let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
@@ -1425,12 +1368,6 @@ mod fused_tests {
             ip.bytecode.relative_jump(1);
             bitwise::lt(InstructionContext{ host: &mut (), interpreter: ip });
         });
-        // After execution: top (b) = a+b+imm+!imm =1+2+0+255=258
-        // second (a) = 0 (since b >= a)
-        // let top = interp.stack.top().unwrap();
-        // assert_eq!(*top, U256::from(258u64));
-        // let second = interp.stack.data().get(interp.stack.len()-2).unwrap();
-        // assert_eq!(*second, U256::ZERO);
         assert_eq!(pc, pc2);
         assert_eq!(interp.stack, interp2.stack);
     }
@@ -1516,7 +1453,7 @@ mod fused_tests {
             snop(InstructionContext { host: &mut (), interpreter: ip });
         });
 
-        assert_eq!(pc, 0); // snop 不移动 pc
+        assert_eq!(pc, 0);
         assert_eq!(interp.stack.top().unwrap(), &U256::from(123u64));
     }
 

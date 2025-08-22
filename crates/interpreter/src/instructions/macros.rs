@@ -127,8 +127,8 @@ macro_rules! count {
     ($x:ident, $($rest:ident),*) => (1 + count!($($rest),*));
 }
 
-/// 使用backn取n个数，如backn([a, b, c, d]), 分别对应interpreter.stack.back(4), back(3), back(2), back(1)
-/// back(1) 相当于是top(0)
+/// if use backn to take n num, like backn([a, b, c, d]), it will return (interpreter.stack.back(4), back(3), back(2), back(1))
+/// a = b(4), b = b(3), c = b(2), d = b(1) = top. which order is different with popn.
 #[macro_export]
 macro_rules! backn {
     ([$($x:ident),*], $interpreter:expr $(,$ret:item)?) => {
