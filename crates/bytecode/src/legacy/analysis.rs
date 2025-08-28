@@ -89,7 +89,7 @@ fn code_bitmap_for_si(_jumps: &mut BitVec<u8, Lsb0>, code: u8, _pos: usize) -> O
 
         opcode::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => {
             // set2(jumps, pos+7);
-            Some(9)
+            Some(10)
         }
 
         opcode::SWAP1DUP2 => {
@@ -110,7 +110,7 @@ fn code_bitmap_for_si(_jumps: &mut BitVec<u8, Lsb0>, code: u8, _pos: usize) -> O
         }
 
         opcode::DUP11MULDUP3SUBMULDUP1 => {
-            Some(5)
+            Some(6)
         }
 
         _ => {None}

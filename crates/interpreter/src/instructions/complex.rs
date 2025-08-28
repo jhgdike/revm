@@ -634,7 +634,7 @@ pub(super) fn swap2_swap1_dup3_sub_swap2_dup3_gt_push2<WIRE: InterpreterTypes, H
     *top = if *third > orig_top { U256::ONE } else { U256::ZERO };
 
     // Skip 7 fused bytes + 1 PUSH2 opcode = 8 bytes
-    context.interpreter.bytecode.relative_jump(8);
+    context.interpreter.bytecode.relative_jump(7);
 
     // PUSH2: read immediate and push.
     let imm = context.interpreter.bytecode.read_slice(2);
@@ -675,7 +675,7 @@ pub(super) fn swap1_dup2<WIRE: InterpreterTypes, H: ?Sized>( // todo needs impro
     }
 
     // Two single-byte opcodes
-    context.interpreter.bytecode.relative_jump(2);
+    context.interpreter.bytecode.relative_jump(1);
 }
 
 /// Fused instruction: SHR SHR DUP1 MUL DUP1
@@ -729,7 +729,7 @@ pub(super) fn shr_shr_dup1_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     }
 
     // Five single-byte opcodes
-    context.interpreter.bytecode.relative_jump(5);
+    context.interpreter.bytecode.relative_jump(4);
 }
 
 
@@ -777,7 +777,7 @@ pub(super) fn swap3_pop_pop_popNEW<WIRE: InterpreterTypes, H: ?Sized>(
     push!(context.interpreter, a);
 
     // Four single-byte opcodes
-    context.interpreter.bytecode.relative_jump(4);
+    context.interpreter.bytecode.relative_jump(3);
 }
 
 
@@ -873,7 +873,7 @@ pub(super) fn dup11_mul_dup3_sub_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     }
 
     // Six single-byte opcodes
-    context.interpreter.bytecode.relative_jump(6);
+    context.interpreter.bytecode.relative_jump(5);
 }
 
 #[cfg(test)]
