@@ -585,13 +585,6 @@ pub(super) fn dup3_and<WIRE: InterpreterTypes, H: ?Sized>(
 ) {
     gas!(context.interpreter, gas::VERYLOW * 2);
     
-    // Get the 3rd element from stack top (len-3) 
-    let stack_len = context.interpreter.stack.len();
-    if stack_len < 3 {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-    
     backn!([b3, b2, b1], context.interpreter);
     *b1 = *b1 & *b3; 
     context.interpreter.bytecode.relative_jump(1);
@@ -689,12 +682,6 @@ pub(super) fn shr_shr_dup1_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     // 2*SHR(VL) + DUP1(VL) + MUL(LOW) + DUP1(VL)
     gas!(context.interpreter, 4 * gas::VERYLOW + gas::LOW);
 
-    // Need at least 4 items: s1, v1, s2, v2
-    if context.interpreter.stack.len() < 4 {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
     // First SHR: pop shift, value -> r1
     popn!([s1, v1], context.interpreter);
     let r1 = if s1 < U256::from(256) {
@@ -727,26 +714,6 @@ pub(super) fn shr_shr_dup1_mul_dup1<WIRE: InterpreterTypes, H: ?Sized>(
     context.interpreter.bytecode.relative_jump(4);
 }
 
-
-/// Fused instruction: SWAP3 POP POP POP
-/// Brings 4th element to top and removes next 3 elements
-pub(super) fn swap3_pop_pop_pop<WIRE: InterpreterTypes, H: ?Sized>(
-    context: InstructionContext<'_, H, WIRE>,
-) {
-    gas!(context.interpreter, gas::VERYLOW + 3*gas::BASE);
-    
-    // SWAP3: exchange positions of top and 4th elements
-    if !context.interpreter.stack.exchange(0, 3) {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-    
-    // POP3: remove 3 elements
-    popn!([_val1, _val2, _val3], context.interpreter);
-    
-    context.interpreter.bytecode.relative_jump(3);
-}
-
 ///Start: [a, b, c, d, e, …]
 ///| # | Opcode  | What it does   | Before               | After                |
 // | - | ------- | -------------- | -------------------- | -------------------- |
@@ -755,16 +722,11 @@ pub(super) fn swap3_pop_pop_pop<WIRE: InterpreterTypes, H: ?Sized>(
 // | 3 | `POP`   | drop top       | `[b, c, a, e, …]`    | `[c, a, e, …]`       |
 // | 4 | `POP`   | drop top       | `[c, a, e, …]`       | `[a, e, …]`          |
 /// Fused: SWAP3 ; POP ; POP ; POP
-pub(super) fn swap3_pop_pop_popNEW<WIRE: InterpreterTypes, H: ?Sized>(
+pub(super) fn swap3_pop_pop_pop<WIRE: InterpreterTypes, H: ?Sized>(
     context: InstructionContext<'_, H, WIRE>,
 ) {
     gas!(context.interpreter, gas::VERYLOW + 3 * gas::BASE);
-
-    if context.interpreter.stack.len() < 4 {
-        context.interpreter.halt(InstructionResult::StackUnderflow);
-        return;
-    }
-
+    
     // Pop original top four: a, b, c, d
     popn!([a, _b, _c, _d], context.interpreter);
 
@@ -1595,7 +1557,7 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(2u8)); // 3rd from top (will be popped)
             let _ = ip.stack.push(U256::from(3u8)); // 2nd from top (will be popped) 
             let _ = ip.stack.push(U256::from(4u8)); // top (will be popped)
-            swap3_pop_pop_popNEW(InstructionContext { host: &mut (), interpreter: ip });
+            swap3_pop_pop_pop(InstructionContext { host: &mut (), interpreter: ip });
         });
 
         // Test reference implementation: individual operations
@@ -2060,7 +2022,7 @@ mod fused_tests {
             let _ = ip.stack.push(U256::from(4u8));
 
             let start = Instant::now();
-            swap3_pop_pop_popNEW(InstructionContext { host: &mut (), interpreter: &mut ip });
+            swap3_pop_pop_pop(InstructionContext { host: &mut (), interpreter: &mut ip });
             fused_total += start.elapsed();
 
             black_box(&ip);

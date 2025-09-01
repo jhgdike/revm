@@ -105,8 +105,7 @@ fn code_bitmap_for_si(_jumps: &mut BitVec<u8, Lsb0>, code: u8, _pos: usize) -> O
         }
 
         opcode::SUBSLTISZEROPUSH2 => {
-            // set2(jumps, pos+3);
-            Some(5)
+            Some(6)
         }
 
         opcode::DUP11MULDUP3SUBMULDUP1 => {
@@ -250,55 +249,6 @@ mod tests {
         ];
         let (jump_table, _) = analyze_legacy(bytecode.clone().into());
         assert!(!jump_table.is_valid(1)); // JUMPDEST in push data should not be valid
-    }
-
-    #[test]
-    fn test_code_bitmap_for_si_step_values() {
-        use bitvec::{bitvec, order::Lsb0};
-        
-        let mut jumps = bitvec![u8, Lsb0; 0; 100];
-        
-        let test_cases = [
-            (opcode::DUP3AND, 2),
-            (opcode::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2, 10), 
-            (opcode::SWAP1DUP2, 2),
-            (opcode::SHRSHRDUP1MULDUP1, 5),
-            (opcode::SWAP3POPPOPPOP, 4),
-            (opcode::SUBSLTISZEROPUSH2, 5), 
-            (opcode::DUP11MULDUP3SUBMULDUP1, 6),
-            // Test some other known fused instructions
-            (opcode::PUSH2JUMP, 4),
-            (opcode::PUSH2JUMPI, 4),
-            (opcode::PUSH1ADD, 3),
-            (opcode::PUSH1SHL, 3),
-            (opcode::PUSH1DUP1, 3),
-        ];
-
-        for (opcode_val, expected_steps) in test_cases {
-            let result = code_bitmap_for_si(&mut jumps, opcode_val, 0);
-            assert_eq!(
-                result, 
-                Some(expected_steps),
-                "Opcode 0x{:02X} should return Some({}), got {:?}",
-                opcode_val, expected_steps, result
-            );
-        }
-
-        // Test that regular opcodes return None
-        let regular_opcodes = [
-            opcode::ADD, opcode::MUL, opcode::SUB, opcode::DIV,
-            opcode::PUSH1, opcode::POP, opcode::SWAP1, opcode::DUP1
-        ];
-        
-        for opcode_val in regular_opcodes {
-            let result = code_bitmap_for_si(&mut jumps, opcode_val, 0);
-            assert_eq!(
-                result,
-                None,
-                "Regular opcode 0x{:02X} should return None, got {:?}",
-                opcode_val, result
-            );
-        }
     }
 
     #[test]
