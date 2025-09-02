@@ -71,7 +71,7 @@ fn code_bitmap_for_si(jumps: &mut BitVec<u8, Lsb0>, code: u8, pos: usize) -> Opt
 
         opcode::JUMPIFZERO => {Some(5)}
 
-        opcode::ISZEROPUSH2 => {Some(5)}
+        opcode::ISZEROPUSH2 => {Some(4)}
 
         opcode::DUP2MSTOREPUSH1ADD => {Some(5)}
 
