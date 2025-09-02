@@ -351,8 +351,8 @@ fn calculate_skip_steps(code: &[u8], cur: usize) -> Option<usize> {
         op::PUSH1ADD | op::PUSH1SHL | op::PUSH1DUP1 => Some(2),
         op::JUMPIFZERO => Some(4), // PUSH2 imm16 + NOP JUMPI replaced
         // New fused opcodes with immediates
-        op::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => Some(3), // includes PUSH2 immediate
-        op::SUBSLTISZEROPUSH2 => Some(4), // includes PUSH2 immediate
+        op::SWAP2SWAP1DUP3SUBSWAP2DUP3GTPUSH2 => Some(9), // includes PUSH2 immediate
+        op::SUBSLTISZEROPUSH2 => Some(5), // includes PUSH2 immediate
         _ => None,
     }
 }
